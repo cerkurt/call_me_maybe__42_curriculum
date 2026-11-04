@@ -1,12 +1,17 @@
+"""Manual smoke checks for JSON loading and Pydantic model validation."""
+
 import json
-from src import models, loader
+from src import data_io, data_models
 from pydantic import ValidationError
 
 
 class FunctionDefinitionTests:
+    """Display helpers for validated function definitions."""
+
     def print_valid_function(
-        self, test_function: models.FunctionDefinition
+        self, test_function: data_models.FunctionDefinition
     ) -> None:
+        """Display one function's fields, parameter types, and return type."""
         print(f"\nFunction name: {test_function.name}")
         print(f"Function description: {test_function.description}")
 
@@ -19,17 +24,22 @@ class FunctionDefinitionTests:
 
 
 class PrompTests:
+    """Display helpers for indexed prompt models."""
+
     def print_valid_prompt(
-        self, number: int, test_prompt: models.PromptTest
+        self, number: int, test_prompt: data_models.PromptTest
     ) -> None:
+        """Print the supplied index and the model's user-request text."""
         print(f"Prompt {number}: {test_prompt.prompt}")
 
 
 def test() -> None:
+    """Load both input arrays and display their results or loader errors."""
     print("Testing the functios_definition.json load")
     try:
-        test_validation = loader.model_validation(
-            "data/input/functions_definition.json", models.FunctionDefinition
+        test_validation = data_io.model_validation(
+            "data/input/functions_definition.json",
+            data_models.FunctionDefinition,
         )
         print(f"{len(test_validation)} items in loaded JSON list.")
         print(test_validation)
@@ -55,8 +65,8 @@ def test() -> None:
 
     print("\nTesting the function_calling_tests.json load")
     try:
-        test_validation_1 = loader.model_validation(
-            "data/input/function_calling_tests.json", models.PromptTest
+        test_validation_1 = data_io.model_validation(
+            "data/input/function_calling_tests.json", data_models.PromptTest
         )
         print(f"{len(test_validation_1)} items in loaded JSON list.")
         print(test_validation_1)

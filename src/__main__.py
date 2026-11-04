@@ -1,12 +1,20 @@
+"""Command-line entry point for loading and validating project inputs."""
+
 import argparse
 import sys
 import json
 from pydantic import ValidationError
 
-from . import loader, models
+from . import data_io, data_models
 
 
 def main() -> None:
+    """Parse paths, validate both input arrays, and print their item counts.
+
+    Display loader errors at this command-line boundary and exit with
+    status 1 on failure. The output path is parsed for later integration
+    with generation and result writing.
+    """
     parser = argparse.ArgumentParser(description="Process some prompts")
 
     parser.add_argument(
@@ -30,8 +38,8 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        valid_function_list = loader.model_validation(
-            args.functions_definition, models.FunctionDefinition
+        valid_function_list = data_io.model_validation(
+            args.functions_definition, data_models.FunctionDefinition
         )
     except FileNotFoundError as e:
         print(
@@ -60,8 +68,8 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        valid_prompt_list = loader.model_validation(
-            args.input, models.PromptTest
+        valid_prompt_list = data_io.model_validation(
+            args.input, data_models.PromptTest
         )
     except FileNotFoundError as e:
         print(
@@ -89,6 +97,7 @@ def main() -> None:
         print(f"[{type(e).__name__}] {e}")
         sys.exit(1)
 
+    # These counts are the current CLI integration check for the loaders.
     print(len(valid_prompt_list))
     print(len(valid_function_list))
 
