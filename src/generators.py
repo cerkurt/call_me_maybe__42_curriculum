@@ -96,9 +96,10 @@ def select_next_token_id(logit_list: list, allowed_token_ids: list) -> int:
     if len(allowed_token_ids) == 0:
         raise ValueError("There are no allowed token ids in the given list")
 
+    list_to_set = set(allowed_token_ids)
     # Equal scores can belong to different IDs; enumerate tracks positions.
     for logit_index, logit in enumerate(logit_list):
-        if logit_index not in allowed_token_ids:
+        if logit_index not in list_to_set:
             logit_list[logit_index] = neg_infinite
 
     next_allowed_logit = max(logit_list)
@@ -159,3 +160,151 @@ def generate_function_name(
     raise ValueError(
         "Max token count overflow. Function name cannot be generated."
     )
+
+
+def build_parameter_prompt(
+    user_prompt: str, selected_function: data_models.FunctionDefinition
+) -> str:
+    prompt_name = user_prompt
+    function_name = selected_function.name
+    function_description = selected_function.description
+    function_parameters = selected_function.parameters
+
+    parameter_info_list: list = []
+    for parameter_name, parameter_type in function_parameters.items():
+        parameter_info_list.append(f"{parameter_name}: {parameter_type.type}")
+
+    function_info_tag = (
+        f"Extract the argument values from the user request for the "
+        f"selected function. Listed types indicates the expections. "
+        f"Extract the values from user request, do not use the type names as "
+        f"values.\n"
+        f"Get the parameter names from 'Required parameter(s).\n"
+        f"Return a JSON object that contains only the parameters.\n"
+        f"Do not add any description.\n\n"
+        f"Prompt name: {prompt_name}\n"
+        f"Function name: {function_name}\n"
+        f"Function description: {function_description}\n"
+        f"Required parameter(s):\n"
+        f"{'\n'.join(parameter_info_list)}\n"
+        f"Arguments: "
+    )
+    return function_info_tag
+
+
+def get_json_string_state(text_output: str) -> str:
+    current_state = "not_started"
+
+    escape_chars = ['"', "\\", "/", "b", "f", "n", "r", "t"]
+
+    hex_counter = 0
+    low_case_hex = ["a", "b", "c", "d", "e", "f"]
+    capital_case_hex = ["A", "B", "C", "D", "E", "F"]
+    numbers_hex = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    for char in text_output:
+        if current_state == "not_started":
+            if char == '"':
+                current_state = "in_string"
+            else:
+                current_state = "invalid"
+
+        elif current_state == "in_string":
+            if char == '"':
+                current_state = "completed"
+            elif char == "\\":
+                current_state = "backslash"
+            elif (0 <= ord(char)) and (ord(char) <= 31):
+                current_state = "invalid"
+
+        elif current_state == "backslash":
+            if char == '"':
+                current_state = "in_string"
+            elif char in escape_chars:
+                current_state = "in_string"
+            elif char == "u":
+                current_state = "unicode"
+                hex_counter = 4
+            else:
+                current_state = "invalid"
+
+        elif current_state == "unicode":
+            if (
+                (char in numbers_hex)
+                or (char in low_case_hex)
+                or (char in capital_case_hex)
+            ):
+                hex_counter = hex_counter - 1
+                if hex_counter == 0:
+                    current_state = "in_string"
+            else:
+                current_state = "invalid"
+
+        elif current_state == "completed":
+            if char:
+                current_state = "invalid"
+
+    return current_state
+
+
+def is_this_allowed_string_piece(
+    generated_text: str, control_text: str
+) -> bool:
+    if get_json_string_state(generated_text) == "invalid":
+        return False
+    elif control_text == "":
+        return False
+
+    new_string = generated_text + control_text
+    result_string = get_json_string_state(new_string)
+
+    if result_string != "invalid":
+        return True
+    else:
+        return False
+
+
+def find_allowed_string_token_ids(
+    model_object: Small_LLM_Model,
+    generated_token_ids: list,
+    candidate_token_ids: list,
+) -> list[int]:
+    allowed_string_token_ids: list = []
+    for token_id in candidate_token_ids:
+        new_total_id_list = generated_token_ids + [token_id]
+        decoded_ids_text = model_object.decode(new_total_id_list)
+        if (
+            get_json_string_state(decoded_ids_text) != "invalid"
+            and decoded_ids_text != ""
+        ):
+            allowed_string_token_ids.append(token_id)
+
+    return allowed_string_token_ids
+
+
+def generate_json_string(
+    model_object: Small_LLM_Model,
+    order_text: str,
+    candidate_token_ids: list,
+    max_token_count: int,
+) -> str:
+    all_token_ids = model_object.encode(order_text)[0].tolist()
+    generated_token_ids: list = []
+
+    for _ in range(max_token_count):
+        allowed_ids = find_allowed_string_token_ids(
+            model_object, generated_token_ids, candidate_token_ids
+        )
+        token_logits = model_object.get_logits_from_input_ids(all_token_ids)
+        selected_next_id = select_next_token_id(token_logits, allowed_ids)
+        all_token_ids.append(selected_next_id)
+        generated_token_ids.append(selected_next_id)
+        generated_decoding = model_object.decode(generated_token_ids)
+        if get_json_string_state(generated_decoding) == "completed":
+            return generated_decoding
+    raise ValueError(
+        "Max token count overflow. JSON string cannot be generated."
+    )
+
+
+def format_request_message(identity: str, content: str) -> str:
+    return f"<|im_start|>{identity}\n" f"{content}<|im_end|>\n"

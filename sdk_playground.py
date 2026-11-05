@@ -146,11 +146,13 @@ def constrained_decoding_test() -> None:
 
 def generator_test() -> None:
     """Generate two continuations while reusing one loaded model."""
-    test_object = Small_LLM_Model()
-    result1 = generators.generate_text(test_object, "this is my start text", 5)
+    model_object = Small_LLM_Model()
+    result1 = generators.generate_text(
+        model_object, "this is my start text", 5
+    )
 
     result2 = generators.generate_text(
-        test_object, "this is my start text", 10
+        model_object, "this is my start text", 10
     )
 
     print(result1)
@@ -282,4 +284,180 @@ def function_name_generator_test() -> None:
     print(f"Execution time: {end - start}")
 
 
-function_name_generator_test()
+def parameter_prompt_tester() -> None:
+    start = datetime.datetime.now()
+    model_object = Small_LLM_Model()
+    function_names = function_name_encoding_test(model_object)
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    prompt_file = data_io.model_validation(
+        "data/input/function_calling_tests.json", data_models.PromptTest
+    )
+
+    prompt_text = []
+    # Finish selection and schema display for one request in each turn.
+    for prompt_element in prompt_file:
+        prompt_text.append(prompt_element.prompt)
+        selection_prompt = generators.build_selection_prompt(
+            prompt_element.prompt, validated_functions
+        )
+        result_function_name = generators.generate_function_name(
+            model_object, selection_prompt, function_names, 10
+        )
+
+        for function in validated_functions:
+            if function.name == result_function_name:
+                # Keys are parameter names; values are parameter models.
+                function_info = generators.build_parameter_prompt(
+                    prompt_element.prompt, function
+                )
+                result = generators.generate_text(
+                    model_object, function_info, 30
+                )
+                print(result)
+
+    end = datetime.datetime.now()
+    print(f"Execution time: {end - start}")
+
+
+def string_state_tester() -> None:
+    text = r'"\u00G1"'
+    print(generators.get_json_string_state(text))
+
+
+def allowed_piece_tester() -> None:
+    check = generators.is_this_allowed_string_piece('"hel', "lo")
+    print(check)
+
+
+def first_sdk_tester() -> None:
+    model_object = Small_LLM_Model()
+    generated_ids = model_object.encode('"hel')[0].tolist()
+    # print(f"Generated ids list start : {generated_ids}\n")
+
+    candidate_token_ids: list = []
+    file_path = model_object.get_path_to_vocab_file()
+    with open(file_path, "r") as json_file:
+        #  keys token texts, values are ids.
+        file_content = json.load(json_file)
+        for token_text, token_id in file_content.items():
+            candidate_token_ids.append(token_id)
+
+    # candidate_token_ids.extend(model_object.encode('"')[0].tolist())
+    # candidate_token_ids.extend(model_object.encode("lo")[0].tolist())
+    # candidate_token_ids.extend(model_object.encode("\n")[0].tolist())
+
+    allowed_ids = generators.find_allowed_string_token_ids(
+        model_object, generated_ids, candidate_token_ids
+    )
+    test_text_logits = model_object.get_logits_from_input_ids(generated_ids)
+    next_token_id = generators.select_next_token_id(
+        test_text_logits, allowed_ids
+    )
+    if next_token_id in allowed_ids:
+        generated_ids.append(next_token_id)
+        print(model_object.decode(generated_ids))
+        print(
+            generators.get_json_string_state(
+                model_object.decode(generated_ids)
+            )
+        )
+    # for token_id in candidate_token_ids:
+    #     print(f"Token id: {token_id}")
+    #     print(f"Candidate text: {repr(model_object.decode([token_id]))}")
+    #     if token_id in allowed_ids:
+    #         print("Candidate in alowed tokens: Yes\n")
+    #     else:
+    #         print("Candidate in allowed tokens: No\n")
+    # print(f"Generated ids list end: {generated_ids}")
+
+
+def json_string_generator_tester() -> None:
+    model_object = Small_LLM_Model()
+
+    candidate_token_ids: list = []
+    file_path = model_object.get_path_to_vocab_file()
+    with open(file_path, "r") as json_file:
+        #  keys token texts, values are ids.
+        file_content = json.load(json_file)
+        for token_text, token_id in file_content.items():
+            candidate_token_ids.append(token_id)
+
+    # candidate_token_ids.extend(model_object.encode('"')[0].tolist())
+    # candidate_token_ids.extend(model_object.encode("lo")[0].tolist())
+    # candidate_token_ids.extend(model_object.encode("\n")[0].tolist())
+
+    system_message = generators.format_request_message(
+        "system",
+        "You fill a function argument using the user request. "
+        "Return the argument VALUE, never its name or type. "
+        "Your entire response must be a JSON string literal "
+        "(a quoted value),not a JSON object. Copy spelling and case "
+        "from the request.",
+    )
+
+    user_message = generators.format_request_message(
+        "user",
+        "Function: fn_greet\n"
+        "Description: Generate a greeting message for a person by name.\n"
+        "Argument: name\n"
+        "Type: string\n"
+        "Request: Greet alice\n"
+        "Return only the value.\n",
+    )
+
+    assistant_message = generators.format_request_message(
+        "assistant", '"alice"'
+    )
+
+    user_request_prompt = "Greet Melda"
+    request_text = generators.format_request_message(
+        "user",
+        f"Function: fn_greet\n"
+        f"Description: Generate a greeting message for a person by name.\n"
+        f"Argument: name\n"
+        f"Type: string\n"
+        f"Request: {user_request_prompt}\n"
+        f"Return only the value.\n",
+    )
+
+    open_assistant_start = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    model_input_text = (
+        f"{system_message}\n"
+        f"{user_message}\n"
+        f"{assistant_message}\n"
+        f"{request_text}\n"
+        f"{open_assistant_start}\n"
+    )
+    result_output = generators.generate_json_string(
+        model_object, model_input_text, candidate_token_ids, 20
+    )
+
+    json_to_python_str = json.loads(result_output)
+    if json_to_python_str not in user_request_prompt:
+        raise ValueError("Generated value is not part of the user request.")
+    result_dict: dict = {"name": json_to_python_str}
+
+    function_calling_test = data_models.FunctionCallResult(
+        prompt=user_request_prompt, name="fn_greet", parameters=result_dict
+    )
+
+    path = (
+        "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/project_repo"
+        "/sdk_test_write.json"
+    )
+    data_io.write_results(path, [function_calling_test])
+
+    # print(result_dict)
+    # print(repr(json_to_python_str))
+    # print(repr(result_output))
+    # print(generators.get_json_string_state(result_output))
+
+
+def message_formatter_tester() -> None:
+    print(generators.format_request_message("user", "Greet shrek"))
+
+
+json_string_generator_tester()
