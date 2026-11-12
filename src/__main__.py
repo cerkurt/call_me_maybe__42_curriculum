@@ -5,7 +5,8 @@ import sys
 import json
 from pydantic import ValidationError
 
-from . import data_io, data_models
+from . import data_io, data_models, generators
+from llm_sdk import Small_LLM_Model
 
 
 def main() -> None:
@@ -97,9 +98,36 @@ def main() -> None:
         print(f"[{type(e).__name__}] {e}")
         sys.exit(1)
 
-    # These counts are the current CLI integration check for the loaders.
-    print(len(valid_prompt_list))
-    print(len(valid_function_list))
+    try:
+        model_object = Small_LLM_Model()
+    except ValueError as e:
+        print(
+            f"[{type(e).__name__}] Error generating model object in main. {e}"
+        )
+        sys.exit(1)
+    except OSError as e:
+        print(
+            f"[{(type(e).__name__)}] Error with operating system during "
+            f"generating model object in main. {e}"
+        )
+        sys.exit(1)
+
+    try:
+        model_generation_result = generators.progress_builder(
+            model_object, valid_function_list, valid_prompt_list
+        )
+    except ValueError as e:
+        print(f"[{type(e).__name__}] Error during model progress flow. {e}")
+        sys.exit(1)
+
+    try:
+        data_io.write_results(args.output, model_generation_result)
+    except OSError as e:
+        print(
+            f"[{type(e).__name__}] Error during output writing at "
+            f"{args.output}. {e}"
+        )
+        sys.exit(1)
 
 
 main()
