@@ -5,6 +5,8 @@
 from pydantic import BaseModel
 from typing import Literal
 
+import math
+
 # `functions_definition.json` → `list[FunctionDefinition]`
 # `function_calling_tests.json` → `list[PromptTest]`
 # Output JSON → `list[FunctionCallResult]`
@@ -54,7 +56,7 @@ class FunctionCallResult(BaseModel):
     parameters: dict[str, object]
 
 
-def parameter_count_checker(
+def parameter_type_checker(
     function_object: FunctionDefinition, parameter_dict: dict
 ) -> None:
     parameters_from_function: list = []
@@ -96,7 +98,14 @@ def parameter_count_checker(
                 f"{type.__class__(parameter_value)} but must be part of 'int'"
                 f" or 'float' class."
             )
-
+        elif parameter_type.type == "number" and (
+            isinstance(parameter_value, float)
+            and not math.isfinite(parameter_value)
+        ):
+            raise ValueError(
+                "Infinite number generated. Unsupported number to write in a "
+                "standard JSON file."
+            )
         elif parameter_type.type == "string" and not isinstance(
             parameter_value, str
         ):

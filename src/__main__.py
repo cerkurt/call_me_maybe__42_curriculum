@@ -122,6 +122,12 @@ def main() -> None:
 
     try:
         data_io.write_results(args.output, model_generation_result)
+    except ValueError as e:
+        print(
+            f"[{type(e).__name__}] Error during JSON conversion at "
+            f"{args.output}. {e}"
+        )
+        sys.exit(1)
     except OSError as e:
         print(
             f"[{type(e).__name__}] Error during output writing at "

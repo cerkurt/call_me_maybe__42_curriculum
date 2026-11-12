@@ -5,6 +5,7 @@ from . import data_models
 
 import re
 import json
+import math
 
 
 def generate_text(
@@ -458,7 +459,14 @@ def extract_numbers_from_user_request(user_request: str) -> list[float]:
 
     float_list: list = []
     for number in numbers_in_string:
-        float_list.append(float(number))
+        float_conversion = float(number)
+        if math.isfinite(float_conversion):
+            float_list.append(float_conversion)
+        else:
+            raise ValueError(
+                "Infinite number generated. Unsupported number to write in a "
+                "standard JSON file."
+            )
 
     return float_list
 
@@ -601,7 +609,7 @@ def progress_builder(
                     parameter_value = json.loads(result)
                     parameter_dict.update({parameter_name: parameter_value})
 
-                data_models.parameter_count_checker(function, parameter_dict)
+                data_models.parameter_type_checker(function, parameter_dict)
                 new_function_object = data_models.FunctionCallResult(
                     prompt=user_request,
                     name=function.name,

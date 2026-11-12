@@ -261,7 +261,7 @@ def function_name_generator_test() -> None:
         selection_prompt = generators.build_selection_prompt(
             prompt_element.prompt, validated_functions
         )
-        result_function_name = generators.generate_function_name(
+        result_function_name = generators.generate_name_from_candidates(
             model_object, selection_prompt, function_names, 10
         )
 
@@ -303,7 +303,7 @@ def parameter_prompt_tester() -> None:
         selection_prompt = generators.build_selection_prompt(
             prompt_element.prompt, validated_functions
         )
-        result_function_name = generators.generate_function_name(
+        result_function_name = generators.generate_name_from_candidates(
             model_object, selection_prompt, function_names, 10
         )
 
@@ -460,4 +460,230 @@ def message_formatter_tester() -> None:
     print(generators.format_request_message("user", "Greet shrek"))
 
 
-json_string_generator_tester()
+def string_parameter_messages_tester() -> None:
+    model_object = Small_LLM_Model()
+
+    candidate_token_ids: list = []
+    file_path = model_object.get_path_to_vocab_file()
+    with open(file_path, "r") as json_file:
+        #  keys token texts, values are ids.
+        file_content = json.load(json_file)
+        for token_text, token_id in file_content.items():
+            candidate_token_ids.append(token_id)
+
+    path = (
+        "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/"
+        "project_repo/data/input/functions_definition.json"
+    )
+    function_definitions = data_io.model_validation(
+        path, data_models.FunctionDefinition
+    )
+
+    for function in function_definitions:
+        if function.name == "fn_reverse_string":
+            model_input_text = generators.message_for_string_parameter(
+                "Reverse the string 'hello'", function, "s"
+            )
+    json_text_output = generators.generate_json_string(
+        model_object, model_input_text, candidate_token_ids, 10
+    )
+
+    print(json.loads(json_text_output))
+
+
+def string_slicer_tester() -> None:
+    # user_request = "Reverse 'hello world' please"
+    # parameter_name = "s"
+    start = datetime.datetime.now()
+    model_object = Small_LLM_Model()
+    function_names = function_name_encoding_test(model_object)
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    prompt_file = data_io.model_validation(
+        "data/input/function_calling_tests.json", data_models.PromptTest
+    )
+
+    list_to_write: list = []
+    for prompt_element in prompt_file:
+        user_request = prompt_element.prompt
+        selection_prompt = generators.build_selection_prompt(
+            user_request, validated_functions
+        )
+        result_function_name = generators.generate_name_from_candidates(
+            model_object, selection_prompt, function_names, 10
+        )
+
+        for function in validated_functions:
+            if function.name == result_function_name:
+                parameter_dict: dict = {}
+                for (
+                    parameter_name,
+                    parameter_type,
+                ) in function.parameters.items():
+                    candidates: list[float] | list[str]
+                    if parameter_type.type == "number":
+                        candidates = (
+                            generators.extract_numbers_from_user_request(
+                                user_request
+                            )
+                        )
+                        model_input_text = (
+                            generators.message_for_number_parameter(
+                                user_request,
+                                function,
+                                parameter_name,
+                                parameter_dict,
+                            )
+                        )
+
+                    elif parameter_type.type == "string":
+                        candidates = generators.string_slicer(
+                            user_request, len(function.parameters)
+                        )
+                        model_input_text = (
+                            generators.message_for_number_parameter(
+                                user_request,
+                                function,
+                                parameter_name,
+                                parameter_dict,
+                            )
+                        )
+
+                    json_and_id_match_dict: dict = {}
+                    for candidate in candidates:
+                        json_text = " " + json.dumps(candidate)
+                        id_list = model_object.encode(json_text)[0].tolist()
+                        json_and_id_match_dict.update({json_text: id_list})
+
+                    result = generators.generate_name_from_candidates(
+                        model_object,
+                        model_input_text,
+                        json_and_id_match_dict,
+                        20,
+                    )
+
+                    parameter_value = json.loads(result)
+                    parameter_dict.update({parameter_name: parameter_value})
+
+                data_models.parameter_type_checker(function, parameter_dict)
+                new_function_object = data_models.FunctionCallResult(
+                    prompt=user_request,
+                    name=function.name,
+                    parameters=parameter_dict,
+                )
+                list_to_write.append(new_function_object)
+
+    data_io.write_results(
+        "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/project_repo/"
+        "write_test_io.json",
+        list_to_write,
+    )
+    end = datetime.datetime.now()
+    print(f"Execution time: {end - start}")
+
+
+def number_extractor_tester() -> None:
+    print(generators.extract_numbers_from_user_request("21.5 and -5.5 and 0"))
+
+
+def number_messager_tester() -> None:
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    for function in validated_functions:
+        if function.name == "fn_add_numbers":
+            print(
+                generators.message_for_number_parameter(
+                    "What is the sum of 2 and 3?", function, "b", {"a": 2.0}
+                )
+            )
+
+
+def progress_builder_bool_tester(
+    model_object: Small_LLM_Model,
+    function_list: list[data_models.FunctionDefinition],
+    parameter_name: str,
+    expected_result_list: list[bool],
+) -> None:
+    prompt_list = data_io.model_validation(
+        "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/project_repo/"
+        "data/input/boolean_prompts.json",
+        data_models.PromptTest,
+    )
+
+    result_list = generators.progress_builder(
+        model_object, function_list, prompt_list
+    )
+
+    succesful_outputs: int = 0
+    if len(expected_result_list) == len(result_list):
+        for result, expected in zip(result_list, expected_result_list):
+            output_result = result.parameters[parameter_name]
+            print(
+                f"Prompt: {result.prompt}\n"
+                f"Expected result: {expected}\n"
+                f"Actual result: {output_result}\n"
+            )
+            if output_result == expected:
+                succesful_outputs += 1
+    else:
+        if len(expected_result_list) > len(result_list):
+            raise ValueError("Missing function object(s) in the result list.")
+        else:
+            raise ValueError(
+                "Missing boolean results to compare in expected results."
+            )
+
+    print(f"{succesful_outputs} / {len(expected_result_list)}")
+
+
+# model_object = Small_LLM_Model()
+
+# progress_builder_bool_tester(
+#     model_object,
+#     data_io.model_validation(
+#         "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/"
+#         "project_repo/data/input/boolean_enabled_functions.json",
+#         data_models.FunctionDefinition,
+#     ),
+#     "enabled",
+#     [True, False],
+# )
+
+# progress_builder_bool_tester(
+#     model_object,
+#     data_io.model_validation(
+#         "/Users/ceren/Desktop/Codam/Milestone_03/call_me_maybe/"
+#         "project_repo/data/input/boolean_disabled_functions copy.json",
+#         data_models.FunctionDefinition,
+#     ),
+#     "disabled",
+#     [False, True],
+# )
+
+
+def parameter_count_validate() -> None:
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    for function in validated_functions:
+        if function.name == "fn_add_numbers":
+            data_models.parameter_type_checker(function, {"a": 21.55, "b": 3})
+            print("success")
+
+
+def writer_tester() -> None:
+    path = "data/output/dummy.json"
+    model_object = data_models.FunctionCallResult(
+        prompt="What is the sum of 2 and 3?",
+        name="fn_add_numbers",
+        parameters={"a": float("nan"), "b": 3.0},
+    )
+    data_io.write_results(path, [model_object])
+
+
+writer_tester()

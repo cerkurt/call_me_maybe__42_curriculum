@@ -1,4 +1,4 @@
-This project has been created as part of the 42 curriculum by cerkurt.
+*This project has been created as part of the 42 curriculum by cerkurt.*
 
 # call_me_maybe
 
@@ -147,10 +147,13 @@ Examples include:
 - A missing required model field.
 - No allowed candidate continuation.
 - An exhausted generation token budget.
+- A numeric conversion that produces infinity, or a non-finite output value.
 - An unavailable output directory or an output path that is a directory.
 
 Input loading and generation finish before the output writer is called.
-A failure before that stage can leave an older output file in place.
+The writer also serializes the complete result before opening the file.
+A failure before writing, including a JSON conversion error, leaves an
+existing output file in place.
 Check the command's exit status when evaluating a run.
 
 ### Code-quality checks
@@ -394,10 +397,11 @@ arguments. Repeated arguments such as `a=7` and `b=7` are valid.
 
 ### 5. Validate and serialize the result
 
-`parameter_count_checker()` checks missing and unexpected parameter names,
+`parameter_type_checker()` checks missing and unexpected parameter names,
 then verifies the value associated with each declared name:
 
-- `number` accepts `int` or `float` and explicitly rejects `bool`.
+- `number` accepts `int` or finite `float` values and explicitly rejects
+  `bool`. Infinity and NaN are rejected.
 - `string` accepts `str`.
 - `boolean` accepts `bool`.
 
@@ -409,7 +413,17 @@ The additional checker supplies the function-specific checks that this
 broad model field cannot provide alone.
 
 Finally, `model_dump()` converts the result models to dictionaries and
-`json.dump()` writes the collected array.
+`json.dumps(..., allow_nan=False)` prepares the complete JSON text. The
+writer opens the output file only after serialization succeeds, then writes
+that text with the file's `write()` method. Serializing this text again
+would turn the root into a JSON string instead of the required array.
+
+The number extractor rejects non-finite float conversions before candidate
+encoding; the parameter checker independently checks generated values.
+Strict serialization provides a final check when the writer is called
+directly. This prevents `Infinity`, `-Infinity`, and `NaN` constants, which
+are excluded by [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259#section-6).
+The CLI reports serialization errors with status `1`.
 
 The token mask constrains candidate membership. Candidate construction,
 type checking, serialization, and semantic accuracy remain separate
@@ -723,9 +737,9 @@ uv run python -m sdk_playground
 ```
 
 `test_validate.py` runs manual loading/model checks. `sdk_playground.py`
-contains individual experiments; the call at the bottom selects the active
-experiment. It currently points to the boolean tester, which includes a
-known unresolved case. These files are not a complete automated test suite.
+contains individual experiments; inspect the call at the bottom to select
+the active experiment. Some intentionally exercise error cases and raise
+exceptions. These files are not a complete automated test suite.
 
 A module name passed to `python -m` has no `.py` suffix.
 
@@ -739,10 +753,19 @@ Checks recorded on November 12, 2026:
 | Original test set | 9/11 complete calls | All 11 names correct; two regex argument extractions incorrect. |
 | Chat-format selection diagnostic | 20/20 function names | Name selection only, across two request sets. |
 | CLI success/error scenarios | 12/12 expected outcomes | Earlier integration checks, including controlled model/generation failures. |
+| Number-value validation | 8/8 expected outcomes | Finite values, large integers, infinity, NaN, and boolean rejection in a number field. |
+| Strict result writing | 6/6 expected outcomes | Array round trip, non-finite rejection, preserved existing files, and no new file for invalid data. |
+| CLI output-error handling | 2/2 expected outcomes | Real writer and CLI handlers; controlled generation supplied invalid data or an unavailable destination. |
+| Boolean polarity comparison | 3/4 correct values | Both `enabled` cases pass; `disabled` with `Enable notifications` remains incorrect. |
 
 The CLI scenario checks include custom paths, malformed and missing input,
 invalid list members, missing fields, output path failures, and controlled
 initialization/generation errors.
+
+The two output-error checks stubbed model construction and generation to
+reach the output boundary directly. Loading, serialization, file handling,
+and CLI exception handling remained real. The separate 11-request run used
+the real SDK model throughout.
 
 These measurements describe specific test sets. Unseen functions and
 requests still require independent evaluation against the subject's
@@ -750,7 +773,8 @@ requests still require independent evaluation against the subject's
 
 ## Performance analysis
 
-A full run of the additional 11-request set took **31.951 seconds**.
+The latest full run of the additional 11-request set, after strict output
+serialization and CLI error handling were added, took **33.345 seconds**.
 
 Measurement conditions:
 
@@ -794,21 +818,14 @@ therefore remain relevant performance factors.
    `-?\d+(?:\.\d+)?`. Forms such as `.5`, `1e3`, `1,000`, and numbers written
    as words are not interpreted reliably. Conversion to `float` also limits
    precision and range.
-5. **Strict handling of non-finite numbers is unfinished.** An
-   extractor-only probe with a 400-digit number produced infinity; the
-   current default serializer represents it as `Infinity`.
-   [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259) excludes infinity and
-   NaN from JSON numbers. Explicit finite-number checks and strict
-   serialization need hardening before universal JSON validity can be
-   claimed.
-6. **The natural-language quote splitters are limited.** Unquoted multiword
+5. **The natural-language quote splitters are limited.** Unquoted multiword
    arguments and escaped quote delimiters need wider coverage.
-7. **Generation has fixed token budgets.** The current pipeline allows
+6. **Generation has fixed token budgets.** The current pipeline allows
    10 tokens for a function name and 50 for a value candidate. Long valid
    names or values can exhaust those budgets and raise a `ValueError`.
-8. **Test coverage and final quality checks remain open.** The manual
-   experiments and current passing set are useful evidence, but do not
-   establish correctness for all evaluation inputs.
+7. **Broader evaluation remains open.** Current mypy and flake8 checks pass.
+   The manual experiments and current passing set are useful evidence, but
+   do not establish correctness for all evaluation inputs.
 
 These are remaining engineering tasks. The README distinguishes implemented
 behavior, measured successes, and unresolved limits.
@@ -847,9 +864,3 @@ to explain Python data structures, Pydantic models, tokenizer behavior,
 logits, masking, and JSON-string states. It also helped break down algorithms,
 review implementation attempts, design test cases, investigate failures,
 and run targeted verification experiments.
-
-The development approach emphasized the author writing and understanding
-the application code, with iterative feedback and debugging support.
-For this README, AI drafted the documentation from the repository,
-recorded test evidence, and official references; the author reviews and
-edits the final text.

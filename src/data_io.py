@@ -60,15 +60,6 @@ def write_results(
         result_dict = model.model_dump()
         model_to_dict_list.append(result_dict)
 
+    json_text = json.dumps(model_to_dict_list, indent=4, allow_nan=False)
     with open(path, "w") as dummy_json:
-        json.dump(model_to_dict_list, dummy_json, indent=4)
-
-
-# def test() -> None:
-#     path = "data/output/dummy.json"
-#     model_object = data_models.FunctionCallResult(
-#         prompt="What is the sum of 2 and 3?",
-#         name="fn_add_numbers",
-#         parameters={"a": 2.0, "b": 3.0},
-#     )
-#     write_results(path, [model_object])
+        dummy_json.write(json_text)
