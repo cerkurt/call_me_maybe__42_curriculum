@@ -6,6 +6,7 @@ from . import data_models
 import re
 import json
 import math
+import string
 
 
 def generate_text(
@@ -219,6 +220,8 @@ def get_json_string_state(text_output: str) -> str:
         if current_state == "not_started":
             if char == '"':
                 current_state = "in_string"
+            elif char in (" ", "\t", "\n", "\r"):
+                current_state = "not_started"
             else:
                 current_state = "invalid"
 
@@ -254,7 +257,9 @@ def get_json_string_state(text_output: str) -> str:
                 current_state = "invalid"
 
         elif current_state == "completed":
-            if char:
+            if char in (" ", "\t", "\n", "\r"):
+                current_state = "completed"
+            elif char:
                 current_state = "invalid"
 
     return current_state
@@ -313,6 +318,10 @@ def generate_json_string(
         all_token_ids.append(selected_next_id)
         generated_token_ids.append(selected_next_id)
         generated_decoding = model_object.decode(generated_token_ids)
+        print(
+            repr(generated_decoding),
+            get_json_string_state(generated_decoding),
+        )
         if get_json_string_state(generated_decoding) == "completed":
             return generated_decoding
     raise ValueError(
@@ -448,8 +457,8 @@ def string_slicer(
             word_filter_list.append(word)
     word_filter_list.append(user_request)
 
-    for string in inside_the_quotes_substrings:
-        word_filter_list.append(string)
+    for string_piece in inside_the_quotes_substrings:
+        word_filter_list.append(string_piece)
 
     return word_filter_list
 
@@ -534,6 +543,136 @@ def function_name_encoder(
     return name_id_match
 
 
+def name_id_match_dict_generator(
+    model_object: Small_LLM_Model,
+    validated_functions: list[data_models.FunctionDefinition],
+) -> dict:
+    name_id_match: dict = {}
+
+    for function in validated_functions:
+        encoded_name = model_object.encode(function.name)
+        token_id_list: list = encoded_name[0].tolist()
+        name_id_match.update({function.name: token_id_list})
+
+    return name_id_match
+
+
+def candidate_token_id_generator(model_object: Small_LLM_Model) -> list[int]:
+    candidate_token_ids: list = []
+    file_path = model_object.get_path_to_vocab_file()
+    with open(file_path, "r") as json_file:
+        #  keys token texts, values are ids.
+        file_content = json.load(json_file)
+        for token_text, token_id in file_content.items():
+            candidate_token_ids.append(token_id)
+
+    return candidate_token_ids
+
+
+def regex_candidate_generator(
+    user_request: str, source_string: str
+) -> dict[str, str]:
+    literals = string_splitter_inside_the_quotes(user_request)
+
+    available_patterns = {
+        "vowels": "[aeiouAEIOU]",
+        "letters": "[a-zA-Z]+",
+        "digit sequences": "[0-9]+",
+        "uppercase letters": "[A-Z]",
+        "lowercase letters": "[a-z]",
+        "whitespace": r"\s+",
+        "punctuation": "[" + re.escape(string.punctuation) + "]",
+    }
+
+    for string_literal in literals:
+        if string_literal in source_string and string_literal != source_string:
+            available_patterns[f"literal: {string_literal}"] = re.escape(
+                string_literal
+            )
+
+    return available_patterns
+
+
+def generate_regex_pattern(
+    model_object: Small_LLM_Model,
+    user_request: str,
+    source_string: str,
+    replacement: str,
+) -> str:
+    open_assistant_start = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
+    candidates = regex_candidate_generator(user_request, source_string)
+
+    pattern_label_codes: dict = {}
+    for index, label in enumerate(candidates):
+        pattern_label_codes[chr(65 + index)] = label
+
+    encoded_labels: dict = {}
+    for label, title in pattern_label_codes.items():
+        encoded_labels[label] = model_object.encode(label)[0].tolist()
+
+    readable_options = ""
+    for code, description in pattern_label_codes.items():
+        readable_options += f"{code}: {description}\n"
+
+    selection_message = (
+        format_request_message(
+            "system",
+            "Choose what the user wants to find and replace in the source "
+            "text. Return only the letter of the best option. "
+            "Do not execute the replacement.",
+        )
+        + format_request_message(
+            "user",
+            f"Request: {user_request}\n"
+            f"Source text: {source_string}\n"
+            f"Replacement value: {replacement}\n"
+            "Options:\n"
+            f"{readable_options}"
+            "Which option describes what must be found? "
+            "Answer with only its letter.",
+        )
+        + open_assistant_start
+    )
+
+    selected_candidate = generate_name_from_candidates(
+        model_object, selection_message, encoded_labels, 10
+    )
+
+    selected_label = pattern_label_codes[selected_candidate]
+    selected_pattern = candidates[selected_label]
+
+    return selected_pattern
+
+
+def convert_regex_replacement_value(
+    user_request: str, replacement: str
+) -> str:
+    char_name_dict: dict = {
+        "asterisk": "*",
+        "asterisks": "*",
+        "hyphen": "-",
+        "hyphens": "-",
+        "underscore": "_",
+        "underscores": "_",
+    }
+
+    substrings = string_splitter_out_of_quotes(user_request)
+
+    for index in range((len(substrings) - 1)):
+        current_piece = substrings[index]
+        next_piece = substrings[index + 1]
+        if current_piece.lower() == "with":
+            symbol_name = next_piece.rstrip(".,!?;:").lower()
+            if (
+                symbol_name == replacement.lower()
+                and symbol_name in char_name_dict
+            ):
+                return char_name_dict[symbol_name]
+
+    return replacement
+
+
 def progress_builder(
     model_object: Small_LLM_Model,
     validated_function_list: list[data_models.FunctionDefinition],
@@ -609,7 +748,31 @@ def progress_builder(
                     parameter_value = json.loads(result)
                     parameter_dict.update({parameter_name: parameter_value})
 
+                regex_fields = {"source_string", "regex", "replacement"}
+                if regex_fields.issubset(function.parameters):
+                    if (
+                        function.parameters["source_string"].type == "string"
+                        and function.parameters["replacement"].type == "string"
+                        and function.parameters["regex"].type == "string"
+                    ):
+                        source_string = parameter_dict["source_string"]
+                        replacement = parameter_dict["replacement"]
+
+                        replacement = convert_regex_replacement_value(
+                            user_request, replacement
+                        )
+                        parameter_dict["replacement"] = replacement
+
+                        new_regex = generate_regex_pattern(
+                            model_object,
+                            user_request,
+                            source_string,
+                            replacement,
+                        )
+                        parameter_dict["regex"] = new_regex
+
                 data_models.parameter_type_checker(function, parameter_dict)
+
                 new_function_object = data_models.FunctionCallResult(
                     prompt=user_request,
                     name=function.name,

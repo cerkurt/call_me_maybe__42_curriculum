@@ -9,6 +9,7 @@ from src import data_io, data_models, generators
 
 import json
 import datetime
+import re
 
 
 def llm_model_test() -> None:
@@ -323,8 +324,7 @@ def parameter_prompt_tester() -> None:
 
 
 def string_state_tester() -> None:
-    text = r'"\u00G1"'
-    print(generators.get_json_string_state(text))
+    print(generators.get_json_string_state('\t"abc"\n'))
 
 
 def allowed_piece_tester() -> None:
@@ -686,4 +686,199 @@ def writer_tester() -> None:
     data_io.write_results(path, [model_object])
 
 
-writer_tester()
+def regex_tester() -> None:
+    model_object = Small_LLM_Model()
+    test_cases = [
+        ("Replace all numbers in 'Room 12' with X", "Room 12", "X"),
+        (
+            "Replace all vowels in 'Programming is fun' with asterisks",
+            "Programming is fun",
+            "*",
+        ),
+        (
+            "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat "
+            "with another cat'",
+            "The cat sat on the mat with another cat",
+            "dog",
+        ),
+    ]
+
+    for user_request, source_string, replacement in test_cases:
+        selected_pattern = generators.generate_regex_pattern(
+            model_object, user_request, source_string, replacement
+        )
+
+        print(re.sub(selected_pattern, replacement, source_string))
+
+
+# # selected_pattern = generators.generate_name_from_candidates(
+# #     model_object, selection_message, pattern_dict, 10
+# # )
+
+# selected_label = generators.generate_name_from_candidates(
+#     model_object, selection_message, label_dict, 10
+# )
+# selected_pattern = available_patterns[selected_label]
+
+# print(selected_label, selected_pattern)
+# print(re.sub(selected_pattern, replacement, source_string))
+
+# system_message = (
+#     "Return only the requested input argument value as one "
+#     "complete JSON string. Do not execute the function. Only replace the"
+#     "requested part that is described in the user request with the "
+#     "given replacement. Do not try to match with the other parts of the "
+#     "request."
+# )
+
+# example_user_message = (
+#     "Function: find_matches\n"
+#     "Description: Find text matching a regular expression.\n"
+#     "Argument: pattern\n"
+#     "Type: string\n"
+#     "Request: Find uppercase letter sequences in Hello NASA.\n"
+#     "Return only the value of pattern.\n"
+# )
+
+# example_assistant_answer = '"[A-Z]+"'
+
+# formatted_system_message = generators.format_request_message(
+#     "system", system_message
+# )
+# formatted_example_user_message = generators.format_request_message(
+#     "user", example_user_message
+# )
+# formatted_example_assistant_message = generators.format_request_message(
+#     "assistant", example_assistant_answer
+# )
+
+# for function in validated_functions:
+#     if function.name == "fn_substitute_string_with_regex":
+#         user_message = (
+#             f"Function: {function.name}\n"
+#             f"Description: {function.description}\n"
+#             f"Argument: {parameter_to_produce}\n"
+#             f"Type: {function.parameters[parameter_to_produce].type}\n"
+#             f"Request: {user_request}\n"
+#             f"Return only the value of the {parameter_to_produce}.\n"
+#         )
+
+#         formatted_user_message = generators.format_request_message(
+#             "user", user_message
+#         )
+#         model_input_text = (
+#             formatted_system_message
+#             + formatted_example_user_message
+#             + formatted_example_assistant_message
+#             + formatted_user_message
+#             + open_assistant_start
+#         )
+#         print(model_input_text)
+
+# json_string = generators.generate_json_string(
+#     model_object, model_input_text, candidate_token_ids, 10
+# )
+# print(json_string)
+
+# print(re.sub(json.loads(json_string), "*", "Programming is fun"))
+# print(re.sub("[aeiouAEIOU]", "*", "Programming is fun"))
+# print(re.sub("[a-zA-Z]+", "*", "Programming is fun"))
+
+
+def regex_integration_tester() -> None:
+    model_object = Small_LLM_Model()
+
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    validated_prompts = data_io.model_validation(
+        "data/input/function_calling_tests.json", data_models.PromptTest
+    )
+
+    results = generators.progress_builder(
+        model_object, validated_functions, validated_prompts
+    )
+
+    for output in results:
+        if output.name == "fn_substitute_string_with_regex":
+            user_request = output.prompt
+            source_string = output.parameters["source_string"]
+            replacement = output.parameters["replacement"]
+
+            if isinstance(source_string, str) and isinstance(replacement, str):
+                generated_pattern = generators.generate_regex_pattern(
+                    model_object, user_request, source_string, replacement
+                )
+
+                output.parameters["regex"] = generated_pattern
+
+                # print(
+                #     f"User request: {user_request}\n"
+                #     f"Source string: {source_string} / "
+                #     f"Replacement: {replacement} / "
+                #     f"Generated pattern: {generated_pattern}\n"
+                # )
+
+                # print(re.sub(generated_pattern, replacement, source_string))
+
+    data_io.write_results(
+        "data/output/regex_integration_results.json", results
+    )
+
+
+def regex_converter_tester() -> None:
+    model_object = Small_LLM_Model()
+
+    validated_functions = data_io.model_validation(
+        "data/input/functions_definition.json",
+        data_models.FunctionDefinition,
+    )
+    validated_prompts = data_io.model_validation(
+        "data/input/function_calling_tests.json", data_models.PromptTest
+    )
+
+    results = generators.progress_builder(
+        model_object, validated_functions, validated_prompts
+    )
+
+    for output in results:
+        if output.name == "fn_substitute_string_with_regex":
+            user_request = output.prompt
+            source_string = output.parameters["source_string"]
+            replacement = output.parameters["replacement"]
+
+            if isinstance(source_string, str) and isinstance(replacement, str):
+                replacement = generators.convert_regex_replacement_value(
+                    user_request, replacement
+                )
+                output.parameters["replacement"] = replacement
+
+                generated_pattern = generators.generate_regex_pattern(
+                    model_object, user_request, source_string, replacement
+                )
+                output.parameters["regex"] = generated_pattern
+
+                print(
+                    f"User request: {user_request}\n"
+                    f"Source string: {source_string}\n"
+                    f"Replacement: {replacement}\n"
+                    f"Generated pattern: {generated_pattern}"
+                )
+
+                print(
+                    re.sub(generated_pattern, replacement, source_string),
+                    end="\n\n",
+                )
+
+    print(
+        generators.convert_regex_replacement_value(
+            "Replace all vowels with asterisks", "asterisks"
+        )
+    )
+
+    print(
+        generators.convert_regex_replacement_value(
+            "Replace all vowels with 'asterisks'", "asterisks"
+        )
+    )
