@@ -12,7 +12,7 @@ def load_json_file(path: str) -> list:
     and JSONDecodeError propagate to the caller. Raise ValueError if the
     parsed root value is not a list.
     """
-    with open(path, "r") as file_to_load:
+    with open(path, "r", encoding="utf-8") as file_to_load:
         loaded_file = json.load(file_to_load)
 
     if not isinstance(loaded_file, list):
@@ -60,6 +60,9 @@ def write_results(
         result_dict = model.model_dump()
         model_to_dict_list.append(result_dict)
 
-    json_text = json.dumps(model_to_dict_list, indent=4, allow_nan=False)
-    with open(path, "w") as dummy_json:
-        dummy_json.write(json_text)
+    json_text = json.dumps(
+        model_to_dict_list, ensure_ascii=False, allow_nan=False, indent=4
+    )
+
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(json_text)

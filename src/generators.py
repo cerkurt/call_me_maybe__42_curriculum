@@ -47,9 +47,14 @@ def build_selection_prompt(
     The returned string becomes the starting context for generation.
     """
     available_functions: list = []
-
     for function in validated_functions:
-        list_element = f"{function.name}: {function.description}"
+        parameters = ", ".join(
+            f"{name}: {definition.type}"
+            for name, definition in function.parameters.items()
+        )
+
+        list_element = f"{function.name}({parameters}): {function.description}"
+
         available_functions.append(list_element)
 
     readable_list = "\n".join(available_functions)
@@ -62,9 +67,17 @@ def build_selection_prompt(
         f"Function: "
     )
     message_to_model = (
-        "Choose which available function should handle the "
-        "requested action. Respond only with its exact function name. Do not "
-        "produce its arguments or execute it."
+        "Select the available function responsible for the operation "
+        "or state described in the user's request. "
+        "Match the subject and capability of the request to the "
+        "function descriptions, not just individual action words. "
+        "Negative instructions and prohibitions still refer to the "
+        "operation or state they are about. "
+        "Negation determines the intended argument values or final "
+        "state; it should not by itself exclude the function that "
+        "controls that state. "
+        "Return only the exact function name. "
+        "Do not produce arguments or execute the function."
     )
     system_message = format_request_message("system", message_to_model)
     user_message = format_request_message("user", selection_prompt)
@@ -189,6 +202,8 @@ def build_parameter_prompt(
     for parameter_name, parameter_type in function_parameters.items():
         parameter_info_list.append(f"{parameter_name}: {parameter_type.type}")
 
+    parameter_text = "\n".join(parameter_info_list)
+
     function_info_tag = (
         f"Extract the argument values from the user request for the "
         f"selected function. Listed types indicates the expections. "
@@ -201,7 +216,7 @@ def build_parameter_prompt(
         f"Function name: {function_name}\n"
         f"Function description: {function_description}\n"
         f"Required parameter(s):\n"
-        f"{'\n'.join(parameter_info_list)}\n"
+        f"{parameter_text}\n"
         f"Arguments: "
     )
     return function_info_tag
@@ -333,60 +348,6 @@ def format_request_message(identity: str, content: str) -> str:
     return f"<|im_start|>{identity}\n" f"{content}<|im_end|>\n"
 
 
-def message_for_string_parameter(
-    user_request: str,
-    function_object: data_models.FunctionDefinition,
-    parameter_name: str,
-) -> str:
-    function_name = function_object.name
-    function_description = function_object.description
-    parameter_type = function_object.parameters[parameter_name]
-
-    system_message = format_request_message(
-        "system",
-        "You fill a function argument using the user request. "
-        "Return the argument VALUE, never its name or type. "
-        "Your entire response must be a JSON string literal "
-        "(a quoted value),not a JSON object. Copy spelling and case "
-        "from the request. The function has not been called yet. Extract its "
-        "input argument from the user request. Do not perform the operation "
-        "described by the function.",
-    )
-
-    user_message = format_request_message(
-        "user",
-        "Function: fn_greet\n"
-        "Description: Generate a greeting message for a person by name.\n"
-        "Argument: name\n"
-        "Type: string\n"
-        "Request: Greet alice\n"
-        "Return only the value.\n",
-    )
-
-    assistant_message = format_request_message("assistant", '"alice"')
-
-    request_text = format_request_message(
-        "user",
-        f"Function: {function_name}\n"
-        f"Description: {function_description}\n"
-        f"Argument: {parameter_name}\n"
-        f"Type: {parameter_type.type}\n"
-        f"Request: {user_request}\n"
-        f"Return only the value.\n",
-    )
-
-    open_assistant_start = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
-    model_input_text = (
-        f"{system_message}\n"
-        f"{user_message}\n"
-        f"{assistant_message}\n"
-        f"{request_text}\n"
-        f"{open_assistant_start}\n"
-    )
-
-    return model_input_text
-
-
 def string_splitter_out_of_quotes(text: str) -> list[str]:
     completed_parts: list = []
     current_part: list = []
@@ -417,9 +378,11 @@ def string_splitter_inside_the_quotes(text: str) -> list[str]:
     current_part: list = []
     is_quote_active = None
 
-    for char in text:
+    for index, char in enumerate(text):
         if is_quote_active is None:
-            if char in ("'", '"') and not current_part:
+            if char in ("'", '"') and not (
+                char == "'" and index > 0 and text[index - 1].isalnum()
+            ):
                 is_quote_active = char
         elif char == is_quote_active:
             completed_parts.append("".join(current_part))
@@ -431,20 +394,12 @@ def string_splitter_inside_the_quotes(text: str) -> list[str]:
     return completed_parts
 
 
-def string_slicer(
-    user_request: str, function_parameter_count: int
-) -> list[str]:
+def string_slicer(user_request: str) -> list[str]:
     inside_the_quotes_substrings = string_splitter_inside_the_quotes(
         user_request
     )
-    if (
-        function_parameter_count == 1
-        and len(inside_the_quotes_substrings) == 1
-    ):
-        return inside_the_quotes_substrings
-
     out_of_the_quotes_substrings = string_splitter_out_of_quotes(user_request)
-    # print(out_of_the_quotes_substrings)
+
     word_filter_list: list = []
     for word in out_of_the_quotes_substrings:
         if len(word) >= 2 and (
@@ -455,42 +410,95 @@ def string_slicer(
             word_filter_list.append(sliced_word)
         else:
             word_filter_list.append(word)
-    word_filter_list.append(user_request)
 
-    for string_piece in inside_the_quotes_substrings:
-        word_filter_list.append(string_piece)
+    segments = re.split(
+        r"""(?<!\w)('[^']*'|"[^"]*")""",
+        user_request,
+    )
 
-    return word_filter_list
+    for segment in segments[::2]:
+        words = segment.split()
+
+        for size in (2, 3):
+            for start in range(len(words) - size + 1):
+                candidate = " ".join(words[start : start + size])
+
+                if candidate != user_request:
+                    word_filter_list.append(candidate)
+
+    # word_filter_list.append(user_request)
+    for word in out_of_the_quotes_substrings:
+        clean_word = word.rstrip(".!?")
+        if clean_word != word and clean_word:
+            word_filter_list.append(clean_word)
+
+    word_filter_list.extend(inside_the_quotes_substrings)
+
+    return list(dict.fromkeys(word_filter_list))
 
 
 def extract_numbers_from_user_request(user_request: str) -> list[float]:
-    numbers_in_string: list = re.findall(r"-?\d+(?:\.\d+)?", user_request)
+    number_pattern = (
+        r"(?<![\w.])"
+        r"[-+]?"
+        r"(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+        r"(?:[eE][+-]?\d+)?"
+        r"(?!\w)"
+    )
 
-    float_list: list = []
+    numbers_in_string = re.findall(number_pattern, user_request)
+
+    float_list: list[float] = []
+
     for number in numbers_in_string:
-        float_conversion = float(number)
+        float_conversion = float(number.replace(",", ""))
+
         if math.isfinite(float_conversion):
             float_list.append(float_conversion)
         else:
             raise ValueError(
-                "Infinite number generated. Unsupported number to write in a "
-                "standard JSON file."
+                "Non-finite number generated. "
+                "Unsupported number to write in standard JSON."
             )
 
     return float_list
 
 
-def message_for_number_parameter(
+def message_for_parameter_extraction(
     user_request: str,
     function_object: data_models.FunctionDefinition,
     given_parameter_name: str,
     extracted_parameters: dict,
 ) -> str:
-    system_message = format_request_message(
-        "system",
-        "Extract the input arguments for the selected function. Return a "
-        "JSON object. Do not execute the function.\n",
-    )
+    parameter_type = function_object.parameters[given_parameter_name].type
+
+    if parameter_type == "string":
+        system_instruction = (
+            "Extract the value of the current parameter from the user's "
+            "request. Use the function description and parameter name to "
+            "determine which part of the request supplies that value. "
+            "Distinguish the requested action from its argument. "
+            "Do not return the command itself unless it is explicitly the "
+            "requested argument value. "
+            "Preserve the complete value exactly, including empty strings, "
+            "spaces, punctuation, and Unicode characters. "
+            "Quoted text may be an argument, but is not automatically the "
+            "value of every parameter. "
+            "If the request mentions both the target of an action and "
+            "additional words describing how to perform that action, "
+            "identify which one corresponds to the current parameter. "
+            "For a parameter referring to the recipient or target, "
+            "extract that recipient or target, not the words describing "
+            "how the action should be performed. "
+            "Return a JSON object. Do not execute the function."
+        )
+    else:
+        system_instruction = (
+            "Extract the input arguments for the selected function. "
+            "Return a JSON object. Do not execute the function."
+        )
+
+    system_message = format_request_message("system", system_instruction)
 
     message = (
         f"Function: {function_object.name}\n"
@@ -502,20 +510,40 @@ def message_for_number_parameter(
     message += "Required parameters:\n"
     message += f"Extracted parameters: {extracted_parameters}\n"
 
-    for parameter_name, parameter_type in function_object.parameters.items():
-        input_string = f"{parameter_name}: {parameter_type.type}"
+    for (
+        parameter_name,
+        parameter_value_type,
+    ) in function_object.parameters.items():
+        input_string = f"{parameter_name}: {parameter_value_type.type}"
         message += f"{input_string}\n"
 
     if function_object.parameters[given_parameter_name].type == "boolean":
         message += (
-            "For the requested input, should the boolean parameter "
-            f"named {given_parameter_name} have the value true or false? "
-            "Use the meaning of this parameter name, not whether the request "
-            "was made."
+            "\nDetermine the desired final state represented by the "
+            f"boolean parameter '{given_parameter_name}'. "
+            "Pay careful attention to negation and which action it modifies. "
+            "'Do not enable' and 'do not turn on' indicate an off state. "
+            "'Do not disable' and 'do not turn off' indicate an on state. "
+            "Map the desired state to true or false according to the "
+            "meaning of the parameter name. "
+            "Do not choose the value based on isolated action words."
         )
+
+    if function_object.parameters[given_parameter_name].type == "number":
+        message += (
+            "\nIdentify the number corresponding to the current parameter "
+            "using its name and the user's request. "
+            "Preserve the sign of the number, including a leading minus sign. "
+            "Previously extracted parameters are context, not values to copy. "
+            "Different arguments may have the same numerical value.\n"
+        )
+
     user_message = format_request_message("user", message)
 
-    json_text = json.dumps(extracted_parameters)
+    json_text = json.dumps(
+        extracted_parameters,
+        ensure_ascii=False,
+    )
     dictionary_prepare = json_text[:-1]
     json_key = json.dumps(given_parameter_name)
     if len(extracted_parameters) != 0:
@@ -673,68 +701,219 @@ def convert_regex_replacement_value(
     return replacement
 
 
+def score_function_candidate(
+    model_object: Small_LLM_Model,
+    selection_prompt: str,
+    function_name: str,
+) -> float:
+    context_ids = model_object.encode(selection_prompt)[0].tolist()
+    candidate_ids = model_object.encode(function_name)[0].tolist()
+
+    total_score = 0.0
+
+    for token_id in candidate_ids:
+        logits = model_object.get_logits_from_input_ids(context_ids)
+
+        max_logit = max(logits)
+        log_sum_exp = max_logit + math.log(
+            sum(math.exp(logit - max_logit) for logit in logits)
+        )
+
+        total_score += logits[token_id] - log_sum_exp
+        context_ids.append(token_id)
+
+    return total_score
+
+
+def generate_name_by_full_scoring(
+    model_object,
+    selection_prompt: str,
+    function_id_match: dict,
+) -> str:
+
+    scores: dict[str, float] = {
+        function_name: score_function_candidate(
+            model_object,
+            selection_prompt,
+            function_name,
+        )
+        for function_name in function_id_match
+    }
+
+    return max(scores, key=lambda name: scores[name])
+
+
+def capability_score(
+    model_object: Small_LLM_Model,
+    user_request: str,
+    function: data_models.FunctionDefinition,
+) -> float:
+    parameters = []
+
+    for name, definition in function.parameters.items():
+        parameters.append(f"{name}: {definition.type}")
+
+    parameter_text = ", ".join(parameters)
+
+    system_message = format_request_message(
+        "system",
+        "Determine whether the given function can fulfill "
+        "the user's request by choosing appropriate argument "
+        "values. Consider the function's actual capability, "
+        "not whether the user wants an action enabled or "
+        "disabled. Answer only Yes or No.",
+    )
+
+    user_message = format_request_message(
+        "user",
+        f"Request: {user_request}\n"
+        f"Function: {function.name}\n"
+        f"Description: {function.description}\n"
+        f"Parameters: {parameter_text}\n\n"
+        "Can this function fulfill the request?",
+    )
+
+    assistant_start = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
+    prompt = system_message + user_message + assistant_start
+
+    yes_score = score_function_candidate(model_object, prompt, "Yes")
+
+    no_score = score_function_candidate(model_object, prompt, "No")
+
+    return yes_score - no_score
+
+
+def hybrid_function_selection(
+    model_object: Small_LLM_Model,
+    user_request: str,
+    functions: list[data_models.FunctionDefinition],
+) -> str:
+    if not functions:
+        raise ValueError("No available functions.")
+
+    selection_prompt = build_selection_prompt(user_request, functions)
+
+    best_function = None
+    second_function = None
+
+    best_score = float("-inf")
+    second_score = float("-inf")
+
+    for function in functions:
+        score = score_function_candidate(
+            model_object,
+            selection_prompt,
+            function.name,
+        )
+
+        if score > best_score:
+            second_function = best_function
+            second_score = best_score
+
+            best_function = function
+            best_score = score
+
+        elif score > second_score:
+            second_function = function
+            second_score = score
+
+    if best_function is None:
+        raise ValueError("No function candidate could be scored.")
+
+    if second_function is None:
+        return best_function.name
+
+    margin = best_score - second_score
+
+    if margin >= 2.0:
+        return best_function.name
+
+    first_capability = capability_score(
+        model_object, user_request, best_function
+    )
+
+    second_capability = capability_score(
+        model_object, user_request, second_function
+    )
+
+    if first_capability >= second_capability:
+        return best_function.name
+
+    return second_function.name
+
+
 def progress_builder(
     model_object: Small_LLM_Model,
     validated_function_list: list[data_models.FunctionDefinition],
     validated_prompt_list: list[data_models.PromptTest],
 ) -> list[data_models.FunctionCallResult]:
-    name_id_dict = function_name_encoder(model_object, validated_function_list)
-
     list_to_write: list = []
+
     for prompt in validated_prompt_list:
         user_request = prompt.prompt
-        selection_prompt = build_selection_prompt(
-            user_request, validated_function_list
-        )
-        result_function_name = generate_name_from_candidates(
-            model_object, selection_prompt, name_id_dict, 10
+
+        result_function_name = hybrid_function_selection(
+            model_object,
+            user_request,
+            validated_function_list,
         )
         for function in validated_function_list:
             if function.name == result_function_name:
+                regex_fields = {"source_string", "regex", "replacement"}
+
+                is_regex_function = regex_fields.issubset(
+                    function.parameters
+                ) and all(
+                    function.parameters[field].type == "string"
+                    for field in regex_fields
+                )
+
                 parameter_dict: dict = {}
                 for (
                     parameter_name,
                     parameter_type,
                 ) in function.parameters.items():
                     candidates: list[float] | list[str] | list[bool]
+
+                    if is_regex_function and parameter_name == "regex":
+                        continue
+
                     if parameter_type.type == "number":
                         candidates = extract_numbers_from_user_request(
                             user_request
                         )
-                        model_input_text = message_for_number_parameter(
-                            user_request,
-                            function,
-                            parameter_name,
-                            parameter_dict,
-                        )
+                        if not candidates:
+                            raise ValueError(
+                                f"No candidates found for parameter "
+                                f"'{parameter_name}' in user request as "
+                                f"{user_request}"
+                            )
 
                     elif parameter_type.type == "string":
-                        candidates = string_slicer(
-                            user_request, len(function.parameters)
-                        )
-                        model_input_text = message_for_number_parameter(
-                            user_request,
-                            function,
-                            parameter_name,
-                            parameter_dict,
-                        )
+                        candidates = string_slicer(user_request)
+
                     elif parameter_type.type == "boolean":
                         candidates = [True, False]
-                        model_input_text = message_for_number_parameter(
-                            user_request,
-                            function,
-                            parameter_name,
-                            parameter_dict,
-                        )
+
                     else:
                         raise ValueError(
                             f"Unsupported parameter type for parameter "
                             f"'{parameter_name}' as '{parameter_type.type}'"
                         )
 
+                    model_input_text = message_for_parameter_extraction(
+                        user_request,
+                        function,
+                        parameter_name,
+                        parameter_dict,
+                    )
+
                     json_and_id_match_dict: dict = {}
                     for candidate in candidates:
-                        json_text = " " + json.dumps(candidate)
+                        json_text = " " + json.dumps(
+                            candidate, ensure_ascii=False
+                        )
                         id_list = model_object.encode(json_text)[0].tolist()
                         json_and_id_match_dict.update({json_text: id_list})
 
@@ -746,38 +925,45 @@ def progress_builder(
                     )
 
                     parameter_value = json.loads(result)
-                    parameter_dict.update({parameter_name: parameter_value})
+                    parameter_dict[parameter_name] = parameter_value
 
-                regex_fields = {"source_string", "regex", "replacement"}
-                if regex_fields.issubset(function.parameters):
-                    if (
-                        function.parameters["source_string"].type == "string"
-                        and function.parameters["replacement"].type == "string"
-                        and function.parameters["regex"].type == "string"
-                    ):
-                        source_string = parameter_dict["source_string"]
-                        replacement = parameter_dict["replacement"]
+                if is_regex_function:
+                    source_string_value = parameter_dict["source_string"]
+                    replacement_value = parameter_dict["replacement"]
 
-                        replacement = convert_regex_replacement_value(
-                            user_request, replacement
+                    if not isinstance(
+                        source_string_value, str
+                    ) or not isinstance(replacement_value, str):
+                        raise ValueError(
+                            "Regex source_string and replacement "
+                            "must both be strings."
                         )
-                        parameter_dict["replacement"] = replacement
 
-                        new_regex = generate_regex_pattern(
-                            model_object,
-                            user_request,
-                            source_string,
-                            replacement,
-                        )
-                        parameter_dict["regex"] = new_regex
+                    replacement = convert_regex_replacement_value(
+                        user_request, replacement_value
+                    )
+                    parameter_dict["replacement"] = replacement
+
+                    new_regex = generate_regex_pattern(
+                        model_object,
+                        user_request,
+                        source_string_value,
+                        replacement_value,
+                    )
+                    parameter_dict["regex"] = new_regex
 
                 data_models.parameter_type_checker(function, parameter_dict)
 
+                parameter_dict = {
+                    parameter_name: parameter_dict[parameter_name]
+                    for parameter_name in function.parameters
+                }
                 new_function_object = data_models.FunctionCallResult(
                     prompt=user_request,
                     name=function.name,
                     parameters=parameter_dict,
                 )
                 list_to_write.append(new_function_object)
+                break
 
     return list_to_write

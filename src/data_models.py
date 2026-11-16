@@ -95,7 +95,7 @@ def parameter_type_checker(
                 f"Unexpected parameter value type for parameter "
                 f"'{parameter_name}' as '{parameter_value}'.\n"
                 f"Current parameter value type is "
-                f"{type.__class__(parameter_value)} but must be part of 'int'"
+                f"{type(parameter_value).__name__} but must be part of 'int'"
                 f" or 'float' class."
             )
         elif parameter_type.type == "number" and (
@@ -113,7 +113,7 @@ def parameter_type_checker(
                 f"Unexpected parameter value type for parameter "
                 f"'{parameter_name}' as {parameter_value}'.\n"
                 f"Current parameter value type is "
-                f"{type.__class__(parameter_value)} but must be part of 'str' "
+                f"{type(parameter_value).__name__} but must be part of 'str' "
                 f"class."
             )
 
@@ -124,6 +124,6 @@ def parameter_type_checker(
                 f"Unexpected parameter value type for parameter "
                 f"'{parameter_name}' as '{parameter_value}'.\n"
                 f"Current parameter value type is "
-                f"{type.__class__(parameter_value)} but must be part of 'bool'"
+                f"{type(parameter_value).__name__} but must be part of 'bool'"
                 f"class."
             )

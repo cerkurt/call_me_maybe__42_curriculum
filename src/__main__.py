@@ -119,6 +119,9 @@ def main() -> None:
     except ValueError as e:
         print(f"[{type(e).__name__}] Error during model progress flow. {e}")
         sys.exit(1)
+    except Exception as e:
+        print(f"[{type(e).__name__}] Error during model progress flow. {e}")
+        sys.exit(1)
 
     try:
         data_io.write_results(args.output, model_generation_result)

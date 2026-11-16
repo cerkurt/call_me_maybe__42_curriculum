@@ -52,10 +52,13 @@ The application uses its public encoding, decoding, and logit methods.
 At each generation step, invalid candidate continuations are masked before
 the next token is selected.
 
-**Development snapshot — November 12, 2026:** the additional 11-request test
-set passes all function-name, argument-value, and type checks. The original
-11-request set passes 9 complete calls; two regex-related requests remain
-incorrect. The limits described below are part of the current implementation.
+**Development snapshot — November 16, 2026:** argument extraction now uses
+one shared, type-aware prompt builder. The string candidate pool includes
+quoted values, individual words, two- and three-word phrases, and the full
+request. Regex arguments have a separate constrained category-selection
+step. Current measurements and remaining semantic errors are recorded under
+[Testing strategy](#testing-strategy); passing schema checks alone does not
+establish that a call has the intended meaning.
 
 ## Instructions
 
@@ -110,13 +113,17 @@ Run the additional test set:
 
 ```bash
 uv run python -m src \
-    --functions_definition data/input/mandatory_functions.json \
-    --input data/input/mandatory_prompts.json \
+    --functions_definition ../test_inputs/mandatory_functions.json \
+    --input ../test_inputs/mandatory_prompts.json \
     --output data/output/mandatory_results.json
 ```
 
 Despite their development names, these `mandatory_*` files are a local test
 set assembled during implementation, not an official evaluation dataset.
+In the current workspace, `test_inputs/` is beside `project_repo/`, one
+directory above the repository root. These local fixtures are not a
+guaranteed part of a fresh clone; supply your own files or use the default
+files in `data/input/` if they are unavailable.
 
 Display CLI help:
 
@@ -259,12 +266,14 @@ extractor converts matching text into Python floats.
 ├── llm_sdk/             # Supplied uv workspace package
 │   └── llm_sdk/
 │       └── __init__.py
-├── sdk_playground.py    # Manually selected SDK/decoding experiments
-└── test_validate.py     # Manual loading and validation checks
+└── sdk_playground.py    # Manually selected SDK/decoding experiments
 ```
 
 The CLI imports the reusable `src` modules. Playground experiments remain
 outside the production entry point.
+The local extended fixtures are currently in `../test_inputs/`, outside
+this repository. The earlier `test_validate.py` scratch file has been
+removed from the working tree.
 
 ## Algorithm explanation
 
@@ -276,7 +285,8 @@ flowchart TD
     B --> C["Create one shared SDK model"]
     C --> D["Select a function with token constraints"]
     D --> E["Select each typed argument"]
-    E --> F["Check required keys and value types"]
+    E --> R["For recognized regex schemas: select pattern and normalize replacement"]
+    R --> F["Check required keys and value types"]
     F --> G["Collect FunctionCallResult objects"]
     G --> H["Write one JSON array"]
 ```
@@ -367,19 +377,32 @@ would make index `0` refer to a different token.
 The chosen ID is appended to both histories. Allowed continuations are
 recomputed at the next step.
 
-### 4. Build typed argument candidates
+### 4. Build typed argument candidates and one shared extraction prompt
 
 The production pipeline currently uses a finite set of possible values:
 
 | Declared type | Candidate construction |
 |---|---|
-| `number` | Extract signed integer/decimal text with `re.findall()` and convert it to floats. |
-| `string` | Collect request fragments, quoted text and the original request, with a restrictive single-parameter quoted-text rule. |
+| `number` | Extract signed integers, decimals including `.5`, scientific notation such as `1e3`, and comma-grouped forms such as `1,000`; remove grouping commas and convert to finite floats. |
+| `string` | Keep individual fragments, quoted contents, two- and three-word phrases outside quotes, and the full request; deduplicate while preserving order. |
 | `boolean` | Offer the actual Python values `True` and `False`. |
 
 Each value is serialized with `json.dumps()` and encoded for constrained
 selection. The current representation puts a leading space before that
 serialized value.
+
+`message_for_parameter_extraction()` replaces the earlier
+`message_for_number_parameter()` and separate string-message path. All
+ordinary parameter types share its message assembly and JSON prefix.
+For a string parameter, the system instruction asks for the complete input
+value, preservation of spelling and formatting, and separation of the
+requested action from its argument. Number and boolean parameters use the
+general argument-extraction instruction. Boolean requests also include a
+question about the meaning of the current parameter name.
+
+The current shared builder does not require a separate few-shot string
+example. An older `message_for_string_parameter()` implementation remains
+commented out as development history; it is not part of CLI generation.
 
 The request, selected function, all parameter declarations, current parameter
 name, and arguments already extracted are included in the model input.
@@ -395,7 +418,54 @@ then stored under the current parameter name.
 The candidate list can contain the same numeric value for different
 arguments. Repeated arguments such as `a=7` and `b=7` are valid.
 
-### 5. Validate and serialize the result
+The n-gram step means contiguous groups of **two or three words**, not model
+tokens. For `Greet Ceren Kurt`, the pool includes `Ceren`, `Kurt`,
+`Greet Ceren`, `Ceren Kurt`, and the complete request. For
+`Echo the text Good morning everyone`, it also contains
+`Good morning everyone`. Quoted spans are preserved separately rather than
+being split into n-grams. Keeping several candidates makes the correct
+value available; the model still has to choose it correctly.
+
+The former single-parameter/single-quote shortcut was removed. In
+`Greet Ceren Kurt using the word 'hello'`, the presence of `hello` therefore
+does not remove `Ceren Kurt` from the pool. This is a bounded candidate
+strategy: arbitrary unquoted phrases of four or more words are not all
+enumerated.
+
+### 5. Handle recognized regex arguments
+
+`progress_builder()` recognizes a regex schema when it contains
+`source_string`, `regex`, and `replacement`, all declared as `string`.
+This check is based on parameter names and types, not a hardcoded function
+name. It does not recognize every possible naming convention for regex
+functions.
+
+For such a schema, the ordinary parameter loop skips `regex` and first
+extracts the source text and replacement. After those values are available:
+
+1. `convert_regex_replacement_value()` handles supported unquoted character
+   names following `with`, such as `asterisks` becoming `*`. Quoted
+   `'asterisks'` remains literal text. The current names cover asterisk,
+   hyphen, and underscore, including their plural forms.
+2. `regex_candidate_generator()` builds seven category patterns: vowels,
+   letters, digit sequences, uppercase letters, lowercase letters,
+   whitespace, and punctuation. It also adds eligible quoted literals from
+   the request using `re.escape()`.
+3. `generate_regex_pattern()` presents category descriptions with short
+   option codes such as `A`, `B`, and `C`. It encodes the codes and uses the
+   same prefix constraints and logit masking to select an allowed code.
+4. The code is mapped back to its label and then to the actual regex.
+
+For example, the selected vowel category maps to `[aeiouAEIOU]`, while
+digit sequences map to `[0-9]+`. Literal `cat` maps to an escaped literal
+pattern. The final dictionary stores the pattern, not its option code.
+
+This is finite-category selection with request-derived literals, not
+unrestricted regex synthesis. `re.sub()` is used in playground checks to
+verify behavior; the production application outputs the call without
+executing the requested function.
+
+### 6. Validate and serialize the result
 
 `parameter_type_checker()` checks missing and unexpected parameter names,
 then verifies the value associated with each declared name:
@@ -455,6 +525,12 @@ integrated into that path.
   the logit mask restricts which candidate continuations can be selected.
 - **Retain extraction context.** Previously extracted parameters accompany
   the current parameter request.
+- **Share prompt assembly across parameter types.** A type-specific system
+  instruction is selected inside one builder, while function metadata,
+  previous values, chat roles, and the open JSON prefix use one structure.
+- **Expand the pool before constraining selection.** Word n-grams make
+  multiword values available without assuming every quoted phrase is the
+  desired argument. The token mask then restricts selection to that pool.
 - **Accumulate one complete result per request.** Parameter dictionaries
   are initialized outside the inner parameter loop.
 - **Report errors at the CLI boundary.** Lower-level loading and validation
@@ -543,6 +619,70 @@ temperature example.
 This led to a useful debugging order: inspect candidate construction before
 changing the model prompt.
 
+### Multiword values needed both a larger pool and clearer instructions
+
+An earlier pool could offer only separate words for an unquoted full name.
+For `Greet Ceren Kurt`, selecting either `Ceren` or `Kurt` loses part of
+the requested value. Adding contiguous two- and three-word phrases makes
+`Ceren Kurt` available without manually encoding a specific person's name.
+
+Pool construction and prompting solve different parts of this problem.
+The shared builder's string instruction asks for the complete current
+argument and distinguishes it from the command. In
+`Greet Ceren Kurt using the word 'hello'`, both the name and the quoted
+word remain candidates; the function description and parameter name must
+guide the model to the name. The saved 35-request fixture correctly
+extracts all nine greet examples and the six echo examples, including
+an unquoted three-word value, an empty string, and Unicode.
+
+The implementation deduplicates candidates after adding words, phrases,
+quoted spans, and the full request. It does not enumerate every possible
+substring. A targeted pool check still finds no
+`First Second Third Fourth` candidate for the longer command
+`Greet First Second Third Fourth`.
+
+### Valid JSON regexes could still match the wrong characters
+
+The experimental free-string path could produce a complete JSON string
+whose content was the wrong regex. For example, `[a-zA-Z]+` is a valid
+pattern but replaces whole letter sequences when the request asks only
+for vowels. Testing only `json.loads()` would miss that error.
+
+Playground checks therefore applied the selected pattern to source text:
+
+| Source | Pattern | Replacement | Expected diagnostic result |
+|---|---|---|---|
+| `Room 12` | `[0-9]+` | `X` | `Room X` |
+| `Programming is fun` | `[aeiouAEIOU]` | `*` | `Pr*gr*mm*ng *s f*n` |
+| `The cat sat on the mat with another cat` | `cat` | `dog` | `The dog sat on the mat with another dog` |
+
+Selecting short option codes from a described pattern catalog gave a
+usable bounded path. The code, descriptive label, regex text, and encoded
+token sequence have separate roles. Encoding the option codes constrains
+the model's answer to the displayed choices; mapping back supplies the
+actual pattern. Prompt wording still affects which allowed option wins.
+The catalog is therefore documented as limited support, rather than a
+guarantee of arbitrary regex generation.
+
+The literal replacement `asterisks` exposed a separate issue: even the
+correct vowel pattern inserts that word repeatedly unless the requested
+symbol is interpreted as `*`. The small quote-aware character-name helper
+addresses the supported cases while preserving quoted literal text.
+
+### Numeric parsing improvements do not guarantee the chosen argument
+
+The old numeric pattern split `.5`, scientific notation, and comma-grouped
+numbers incorrectly. The updated extractor offers `0.5`, `1000.0`, and
+`1000.0` for `.5`, `1e3`, and `1,000`, respectively. A saved output file can
+still contain results from before the parser changed, so it must be
+distinguished from a fresh CLI run.
+
+For `Add 0.5 and -0.5.`, the current helper returns both signed values.
+If the model selects `0.5` for both parameters, the remaining error is in
+semantic selection, not a missing minus sign in the candidate pool. A fix
+must preserve valid repetitions such as `Add 7 and 7`; globally banning
+already-selected values would break that case.
+
 ### Quoted text, apostrophes, and escape characters have different roles
 
 `Reverse 'hello world' please` contains one quoted argument with an internal
@@ -592,8 +732,10 @@ margin. In the corresponding `world` request, `world` scored about 28.3006
 and `string` about 26.6283.
 
 Restricting a quoted single-argument request to its quoted candidate helped
-those examples. It also introduced an assumption that has counterexamples,
-as documented under current limitations.
+those examples, but excluded the actual name in requests such as
+`Greet Ceren using the word 'hello'`. The current implementation removed
+that shortcut, expanded the pool with n-grams, and strengthened the shared
+string instruction. Quoted text remains available alongside other values.
 
 The same distinction applies to booleans: `disabled: true` is validly
 typed but wrong for a request to enable notifications.
@@ -681,8 +823,9 @@ decodes to:
 
 The verified comparison used `json.load()`/`json.loads()` and the actual
 decoded value. Python's JSON writer uses ASCII escaping by default.
-`ensure_ascii=False` is an optional presentation choice when literal
-Unicode characters are preferred in the file.
+The current writer uses `ensure_ascii=False` and UTF-8 so literal Unicode
+characters remain readable in the file. This changes presentation rather
+than the decoded value.
 See the [Python JSON documentation](https://docs.python.org/3/library/json.html).
 
 ### Exceptions belong at the right boundary
@@ -718,39 +861,76 @@ output with these representative expectations:
 
 | Request | Expected selection |
 |---|---|
-| `Set room 'bedroom' to -5.5 degrees.` | `set_temperature` with `room="bedroom"`, `degrees=-5.5` |
+| `Set room 'living room' to -5.5 degrees.` | `set_temperature` with `room="living room"`, `degrees=-5.5` |
 | `Set the temperature to 18 degrees for room 'office'.` | `set_temperature` with `room="office"`, `degrees=18` |
 | `Disable notifications for room 'kitchen'.` | `set_notifications` with `enabled=false` |
 | `Echo ''` | `echo_text` with an empty `text` string |
 | `Echo 'She said "hello"'` | `echo_text` preserving the inner double quotes |
 | `Echo 'Çağrı 🌡️'` | `echo_text` preserving the decoded Unicode value |
-| `What is the sum of 7 and 7?` | `fn_add_numbers` with both values equal to `7` |
-| `What is the sum of 123456789 and 2?` | `fn_add_numbers` with `123456789` and `2` |
+| `Add 7 and 7.` | `fn_add_numbers` with both values equal to `7` |
+| `Add 123456789 and 2.` | `fn_add_numbers` with `123456789` and `2` |
+| `Greet Ceren Kurt` | `fn_greet` with `name="Ceren Kurt"` |
+| `Greet Ceren Kurt using the word 'hello'` | `fn_greet` with `name="Ceren Kurt"`, retaining the unrelated quoted word as another candidate |
+| `Echo the text Good morning everyone` | `echo_text` with `text="Good morning everyone"` |
 
-The set also includes a negative integer, zero, and a multiword room name.
+As of November 16, this fixture contains six function definitions and
+35 requests. It also includes zero, scientific notation, comma-grouped
+numbers, leading-dot decimals, negation, and quoted/unquoted full names.
+Expected values are specified independently of the generated output.
 
 ### Manual development tools
 
 ```bash
-uv run python -m test_validate
 uv run python -m sdk_playground
 ```
 
-`test_validate.py` runs manual loading/model checks. `sdk_playground.py`
-contains individual experiments; inspect the call at the bottom to select
-the active experiment. Some intentionally exercise error cases and raise
-exceptions. These files are not a complete automated test suite.
+`sdk_playground.py` contains individual experiments; inspect the call at
+the bottom to select the active experiment. Some intentionally exercise error cases and raise
+exceptions. This file is not a complete automated test suite. Some older
+experiments still pass the removed second argument to `string_slicer()` or
+refer to the former fixture locations; update those calls before running
+them. The current production signature is `string_slicer(user_request)`.
 
 A module name passed to `python -m` has no `.py` suffix.
 
 ### Recorded results
 
-Checks recorded on November 12, 2026:
+Fresh checks on November 16, 2026:
 
 | Check | Result | Scope |
 |---|---:|---|
-| Additional test set | 11/11 complete calls | Four definitions; names, values, types, and original prompts checked. |
-| Original test set | 9/11 complete calls | All 11 names correct; two regex argument extractions incorrect. |
+| Saved `extended_test_results.json` | 28/35 complete calls; 34/35 names | Earlier saved output; not the result of the latest numeric extractor. |
+| Current extended fixture, real CLI | 33/35 complete calls; 34/35 names | Six definitions, 35 requests; 89.231 seconds; exit status 0. |
+| Current original fixture, real CLI | 10/11 complete calls; 11/11 names | All three regex calls pass; `Greet shrek` incorrectly includes the command in its argument. |
+| Combined current CLI results | 43/46 complete calls (93.5%); 45/46 names | Known development fixtures, not unseen evaluation data. All 46 results pass strict JSON, original-prompt, key, and declared-type checks. |
+| Numeric helper, direct checks | 10/10 expected lists | Includes `.5`, `-.5`, `1e3`, `1,000`, `1,234,567.89`, `2E-3`, and positive/negative pairs. |
+| String-pool checks | Four expected candidates present; one limit confirmed | Full name, unrelated quoted word, unquoted three-word value, and empty string retained; an internal four-word value is absent. |
+| Mypy / flake8 | 9 errors / 5 violations | Refactoring and playground cleanup remain open. |
+
+Three complete-call errors remain in these two fresh CLI runs:
+
+- `Do not enable notifications for room 'office'.` selects `fn_greet`
+  instead of the notification function. The test expectation interprets
+  this request as `enabled=false`; it requires no function execution.
+- `Add 0.5 and -0.5.` returns positive `0.5` for both parameters, although
+  both signed candidates are available.
+- `Greet shrek` selects the correct function but returns `"Greet shrek"`
+  instead of `"shrek"`. This is a regression from the earlier passing set.
+
+Both CLI runs used the real SDK with cached model files and downloads
+disabled, and wrote to isolated temporary output paths. The supplied saved
+output was left unchanged. Direct helper checks did not run model inference.
+The extended fixture has correct results for all nine greet examples and
+all six echo examples, including full names, Unicode, apostrophes, and empty
+text. Those successes do not cover every name or quoting form.
+
+Historical checkpoints, retained to distinguish earlier versions:
+
+| Check | Result | Scope |
+|---|---:|---|
+| November 12 additional test set | 11/11 complete calls | Earlier four-definition fixture. |
+| November 12 original test set | 9/11 complete calls | All 11 names correct; two regex argument extractions incorrect. |
+| November 15 original and additional sets | 22/22 complete calls | Two 11-request fixtures; cached-model CLI times 37.456 and 35.147 seconds. |
 | Chat-format selection diagnostic | 20/20 function names | Name selection only, across two request sets. |
 | CLI success/error scenarios | 12/12 expected outcomes | Earlier integration checks, including controlled model/generation failures. |
 | Number-value validation | 8/8 expected outcomes | Finite values, large integers, infinity, NaN, and boolean rejection in a number field. |
@@ -773,8 +953,10 @@ requests still require independent evaluation against the subject's
 
 ## Performance analysis
 
-The latest full run of the additional 11-request set, after strict output
-serialization and CLI error handling were added, took **33.345 seconds**.
+The November 16 full CLI run of the expanded **35-request** fixture took
+**89.231 seconds**, including startup and model loading. It returned
+33 completely correct calls, 34 correct function names, and 35
+schema-compliant results. Speed and semantic accuracy are separate checks.
 
 Measurement conditions:
 
@@ -784,8 +966,8 @@ Measurement conditions:
 - The project virtual-environment interpreter ran `python -m src`.
 - Time included application startup, model initialization, generation,
   validation, and output writing.
-- The process exited with status `0` and wrote 11 results identical to
-  the independently verified output.
+- The process exited with status `0` and wrote 35 results to an isolated
+  temporary path, then each call was compared with an explicit expectation.
 
 This measured run is below the subject's five-minute limit for that
 machine and workload. First-time downloads, different hardware, longer
@@ -799,32 +981,44 @@ therefore remain relevant performance factors.
 
 ## Current limitations and remaining work
 
-1. **Values outside the candidate pool cannot be generated by the main
-   argument path.** A request to replace numbers may require a regex such as
-   `\d+`, even though that pattern does not appear literally in the request.
-   The current extraction can select `"numbers"` instead. The vowels case
-   similarly needs a pattern and `"*"` rather than the literal words
-   `"vowels"` and `"asterisks"`.
-2. **Boolean meaning is not fully reliable.** An observed failure returns
+1. **Candidate coverage is bounded.** Ordinary arguments are selected from
+   the constructed pool. Two- and three-word n-grams improve unquoted
+   multiword extraction, but a four-word argument inside a longer unquoted
+   command may still be absent. Quoted spans and the entire original
+   request are retained separately. Prompt instructions cannot recover an
+   absent candidate.
+2. **Regex support has a finite scope.** The specialized branch requires
+   the three canonical string parameter names. Its seven categories and
+   request-derived literals do not cover arbitrary regexes. Whole-source
+   literals are excluded by the current literal filter. Replacement-name
+   conversion only covers the registered asterisk/hyphen/underscore names
+   following English `with`; other names and phrasings need validation.
+3. **Boolean meaning is not fully reliable.** An earlier observed failure returns
    `disabled=true` for `Enable notifications`, where `false` is required.
    Offering only correctly typed boolean candidates does not resolve the
-   meaning of an inverted parameter name.
-3. **Quoted-text restrictions have counterexamples.** When a function has
-   one parameter and the request contains exactly one quoted fragment,
-   `string_slicer()` restricts the pool to that fragment. A request such as
-   `Greet Ceren using the word 'hello'` can therefore exclude the intended
-   name `Ceren`.
-4. **Numeric formats and range need more work.** The extractor currently uses
-   `-?\d+(?:\.\d+)?`. Forms such as `.5`, `1e3`, `1,000`, and numbers written
-   as words are not interpreted reliably. Conversion to `float` also limits
-   precision and range.
+   meaning of an inverted parameter name. That historical polarity test
+   still needs a run against the latest shared prompt. Negated requests
+   also need correct function selection before their argument values can
+   be assessed.
+4. **Numeric extraction and numeric selection are distinct.** The current
+   extractor supports `.5`, `1e3`, and `1,000`; older saved results predate
+   that support. A correct candidate such as `-0.5` can still lose to `0.5`
+   during model selection. Written-out numbers are not converted, and
+   conversion to `float` limits precision and range. Malformed separators,
+   locale-dependent number formats, and numbers embedded in unrelated
+   text need explicit policy and wider tests.
 5. **The natural-language quote splitters are limited.** Unquoted multiword
    arguments and escaped quote delimiters need wider coverage.
 6. **Generation has fixed token budgets.** The current pipeline allows
    10 tokens for a function name and 50 for a value candidate. Long valid
    names or values can exhaust those budgets and raise a `ValueError`.
-7. **Broader evaluation remains open.** Current mypy and flake8 checks pass.
-   The manual experiments and current passing set are useful evidence, but
+7. **Quality checks need refreshing after refactoring.** On November 16,
+   mypy reports nine errors and flake8 reports five violations. These
+   include a reused local variable with incompatible types in the shared
+   builder, outdated playground calls, nested-model type annotations, and
+   long lines. They are tracked in `to-do-list.txt`.
+8. **Broader evaluation remains open.**
+   The manual experiments and current passing cases are useful evidence, but
    do not establish correctness for all evaluation inputs.
 
 These are remaining engineering tasks. The README distinguishes implemented
