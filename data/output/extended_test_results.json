@@ -1,0 +1,417 @@
+[
+    {
+        "prompt": "Set the temperature to 18 degrees for room 'office'.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "office",
+            "degrees": 18.0
+        }
+    },
+    {
+        "prompt": "Set room 'living room' to -5.5 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "living room",
+            "degrees": -5.5
+        }
+    },
+    {
+        "prompt": "Set temperature for 'kitchen' to 0 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "kitchen",
+            "degrees": 0.0
+        }
+    },
+    {
+        "prompt": "Set the temperature to .5 degrees for room 'attic'.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "attic",
+            "degrees": 0.5
+        }
+    },
+    {
+        "prompt": "Set room 'lab' to 1e3 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "lab",
+            "degrees": 1000.0
+        }
+    },
+    {
+        "prompt": "Set room 'warehouse' to 1,000 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "warehouse",
+            "degrees": 1000.0
+        }
+    },
+    {
+        "prompt": "Enable notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": true
+        }
+    },
+    {
+        "prompt": "Disable notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Turn off notifications for room 'living room'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "living room",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Turn on notifications for room 'bedroom'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "bedroom",
+            "enabled": true
+        }
+    },
+    {
+        "prompt": "Do not enable notifications for room 'office'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Echo 'hello world'",
+        "name": "echo_text",
+        "parameters": {
+            "text": "hello world"
+        }
+    },
+    {
+        "prompt": "Echo ''",
+        "name": "echo_text",
+        "parameters": {
+            "text": ""
+        }
+    },
+    {
+        "prompt": "Echo 'She said \"hello\"'",
+        "name": "echo_text",
+        "parameters": {
+            "text": "She said \"hello\""
+        }
+    },
+    {
+        "prompt": "Echo 'Çağrı 🌡️'",
+        "name": "echo_text",
+        "parameters": {
+            "text": "Çağrı 🌡️"
+        }
+    },
+    {
+        "prompt": "Echo the text Good morning everyone",
+        "name": "echo_text",
+        "parameters": {
+            "text": "Good morning everyone"
+        }
+    },
+    {
+        "prompt": "Echo \"I'm Ceren\"",
+        "name": "echo_text",
+        "parameters": {
+            "text": "I'm Ceren"
+        }
+    },
+    {
+        "prompt": "Add 7 and 7.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 7.0,
+            "b": 7.0
+        }
+    },
+    {
+        "prompt": "Add -12.5 and 0.75.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": -12.5,
+            "b": 0.75
+        }
+    },
+    {
+        "prompt": "Add 123456789 and 2.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 123456789.0,
+            "b": 2.0
+        }
+    },
+    {
+        "prompt": "Add 0.5 and -0.5.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 0.5,
+            "b": -0.5
+        }
+    },
+    {
+        "prompt": "Add 1e3 and 2.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 1000.0,
+            "b": 2.0
+        }
+    },
+    {
+        "prompt": "Add 1,000 and 2.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 1000.0,
+            "b": 2.0
+        }
+    },
+    {
+        "prompt": "Reverse 'hello world' please",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "hello world"
+        }
+    },
+    {
+        "prompt": "Reverse 'hello'",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "hello"
+        }
+    },
+    {
+        "prompt": "Reverse the phrase Good morning",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "Good morning"
+        }
+    },
+    {
+        "prompt": "Greet Ceren",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren"
+        }
+    },
+    {
+        "prompt": "Greet Shrek",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Shrek"
+        }
+    },
+    {
+        "prompt": "Greet shrek",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "shrek"
+        }
+    },
+    {
+        "prompt": "Greet 'Shrek'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Shrek"
+        }
+    },
+    {
+        "prompt": "Greet 'shrek'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "shrek"
+        }
+    },
+    {
+        "prompt": "Greet 'Ceren Kurt'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet Ceren Kurt",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet the person by name and surname: Ceren Kurt",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren"
+        }
+    },
+    {
+        "prompt": "Greet the person named Ceren Kurt",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet 'İpek Yılmaz'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "İpek Yılmaz"
+        }
+    },
+    {
+        "prompt": "Greet the person 'Ceren Kurt' by name and surname",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet Ceren Kurt using the word 'hello'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet the person Ceren Kurt by name and surname using the word hello",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet Melinda Selinda using the word 'hello'",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Melinda Selinda"
+        }
+    },
+    {
+        "prompt": "Greet Captain Jack Sparrow with 'hello' word",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Captain Jack Sparrow"
+        }
+    },
+    {
+        "prompt": "Say hello to my best friend Kenny.",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Kenny"
+        }
+    },
+    {
+        "prompt": "What is the sum of 2 and 3?",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 2.0,
+            "b": 3.0
+        }
+    },
+    {
+        "prompt": "What is the sum of 265 and 345?",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 265.0,
+            "b": 345.0
+        }
+    },
+    {
+        "prompt": "Greet john",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "john"
+        }
+    },
+    {
+        "prompt": "What is the square root of 16?",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 16.0
+        }
+    },
+    {
+        "prompt": "Calculate the square root of 144",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 144.0
+        }
+    },
+    {
+        "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "Hello 34 I'm 233 years old",
+            "regex": "[0-9]+",
+            "replacement": "NUMBERS"
+        }
+    },
+    {
+        "prompt": "Replace all vowels in 'Programming is fun' with asterisks",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "Programming is fun",
+            "regex": "[aeiouAEIOU]",
+            "replacement": "*"
+        }
+    },
+    {
+        "prompt": "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "The cat sat on the mat with another cat",
+            "regex": "cat",
+            "replacement": "dog"
+        }
+    },
+    {
+        "prompt": "Don't turn on notifications for room 'office'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Keep notifications disabled in the office.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Prevent notifications from being enabled in the bedroom.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "bedroom",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Please ensure the office notifications remain off.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Do set the temrature -12 degrees for dining room",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "dining room",
+            "degrees": -12.0
+        }
+    }
+]

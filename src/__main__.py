@@ -5,7 +5,7 @@ import sys
 import json
 from pydantic import ValidationError
 
-from . import data_io, data_models, generators
+from . import data_io, data_models, llm_progress_builder
 from llm_sdk import Small_LLM_Model
 
 
@@ -113,7 +113,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        model_generation_result = generators.progress_builder(
+        model_generation_result = llm_progress_builder.progress_builder(
             model_object, valid_function_list, valid_prompt_list
         )
     except ValueError as e:
