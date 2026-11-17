@@ -55,12 +55,10 @@ continuations are masked before the next token is selected. Function-name
 selection instead scores complete available names and may rerank the two
 leaders with a separate capability prompt.
 
-**Current documentation snapshot — November 17, 2026:** The implementation uses
-hybrid full-sequence/capability scoring for function selection and finite-candidate,
-token-level constrained decoding for argument extraction. Testing now includes the
-original 11-prompt input, a 55-prompt regression set, a separate 31-prompt
-seven-function generalization set, and a curated 76-prompt combined regression set.
-See [Testing strategy](#testing-strategy) for exact results and limitations.
+**Current documentation snapshot — The implementation uses hybrid 
+full-sequence/capability scoring for function selection and finite-candidate,
+token-level constrained decoding for argument extraction. See 
+[Testing strategy](#testing-strategy) for exact results and limitations.
 
 
 ## Instructions
