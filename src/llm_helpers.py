@@ -1,3 +1,10 @@
+"""Share chat formatting, token constraints, and candidate scoring helpers.
+
+Use the SDK's public encoding and logit methods with a model supplied by
+the caller. Keep token-ID positions intact when masking logits, and keep
+generated candidate prefixes separate from their full model context.
+"""
+
 from llm_sdk import Small_LLM_Model
 
 
@@ -5,21 +12,36 @@ import math
 
 
 def format_request_message(identity: str, content: str) -> str:
+    """Wrap content in a completed chat message for the supplied role.
+
+    Args:
+        identity: Role text, such as system, user, or assistant.
+        content: Message body to place between the chat markers.
+
+    Returns:
+        The role header, content, closing message marker, and final newline
+        as one string. This helper does not validate the role or create an
+        open assistant response.
+    """
     return f"<|im_start|>{identity}\n" f"{content}<|im_end|>\n"
 
 
 def find_allowed_next_token_ids(
     name_id_pair: dict, candidate_id_list: list
 ) -> list:
-    """Return unique IDs that can continue the generated function-name prefix.
+    """Find unique token IDs that can extend the current candidate prefix.
 
-    name_id_pair maps each function name to its complete token-ID list.
-    candidate_id_list holds only the name IDs produced so far; it starts
-    empty and excludes the prompt IDs. Match this whole prefix against
-    each candidate and collect the following ID from unfinished matches.
+    Args:
+        name_id_pair: Candidate strings mapped to complete token-ID lists.
+        candidate_id_list: IDs generated for the candidate so far, excluding
+            the prompt IDs. An empty list represents the starting prefix.
 
-    Return an empty list when no candidate can continue. The set used for
-    deduplication means the returned IDs have no guaranteed order.
+    Returns:
+        The next IDs from unfinished candidates whose complete initial slice
+        matches the generated prefix. Return an empty list if none can
+        continue. Deduplication uses a set, so output order is not guaranteed.
+
+    Neither the candidate mapping nor the generated prefix is modified.
     """
     allowed_id_list: set = set()
     for name, token_id in name_id_pair.items():
@@ -33,13 +55,22 @@ def find_allowed_next_token_ids(
 
 
 def select_next_token_id(logit_list: list, allowed_token_ids: list) -> int:
-    """Mask scores in place and return the highest-scoring allowed token ID.
+    """Mask logits in place and return the index of the highest score.
 
-    A score's index is its token ID. allowed_token_ids must contain valid
-    indexes into logit_list. Replace forbidden scores with negative
-    infinity while keeping every score at its original position.
+    Args:
+        logit_list: Next-token scores indexed by token ID; modified in place.
+        allowed_token_ids: Permitted indexes into the score list.
 
-    Raise ValueError when the allowed-ID list is empty.
+    Returns:
+        The index of the largest score after forbidden positions are replaced
+        with negative infinity. Equal maxima favor the first index.
+
+    Raises:
+        ValueError: The allowed-ID list is empty.
+
+    Callers must supply valid vocabulary indexes and usable allowed scores.
+    Keeping all positions preserves the correspondence between score indexes
+    and token IDs; this helper does not compact the score list.
     """
     neg_infinite = float("-inf")
 
@@ -61,22 +92,32 @@ def select_next_token_id(logit_list: list, allowed_token_ids: list) -> int:
 def generate_name_from_candidates(
     model_object: Small_LLM_Model,
     selection_prompt: str,
-    function_id_match: dict,
+    function_id_match: dict[str, list[int]],
     max_token_count: int,
 ) -> str:
-    """Generate an exact candidate name using constraints at every token.
+    """Return an exact candidate using token-by-token logit constraints.
 
     Args:
-        model_object: An already initialized SDK model to reuse.
-        selection_prompt: Instruction text prepared for one user request.
-        function_id_match: Names mapped to IDs from this model's tokenizer.
-        max_token_count: Maximum number of newly generated name tokens.
+        model_object: Existing SDK model reused throughout generation.
+        selection_prompt: Model context for selecting the current value.
+        function_id_match: Candidate strings mapped to their encoded ID lists.
+            Despite the name, candidates may be argument values or option
+            codes as well as function names.
+        max_token_count: Maximum number of new candidate tokens to select.
 
-    all_token_ids keeps the prompt and the growing name for model context.
-    generated_token_ids keeps only the name prefix for candidate matching.
-    Return the candidate's original name once its complete ID list matches.
-    Raise ValueError if no continuation is allowed or the limit is reached
-    without completing a candidate name.
+    Returns:
+        The original mapping key whose entire token sequence matches the
+        generated IDs. A complete match is checked before each step and
+        once more after the final permitted step.
+
+    Raises:
+        ValueError: No continuation is allowed or the token budget expires
+            without a complete match.
+
+    Keep prompt-plus-continuation IDs for model context and continuation-only
+    IDs for prefix checks. At each step, mask forbidden scores, greedily
+    select the largest allowed score, and append the selected ID to both
+    histories. Candidate membership is enforced, not semantic correctness.
     """
     encode_result = model_object.encode(selection_prompt)
     all_token_ids = encode_result[0].tolist()
@@ -117,6 +158,23 @@ def score_function_candidate(
     selection_prompt: str,
     function_name: str,
 ) -> float:
+    """Sum token log-probabilities for a complete candidate continuation.
+
+    Args:
+        model_object: Existing SDK model providing encoding and logits.
+        selection_prompt: Context before the candidate continuation.
+        function_name: Candidate text to score; may also be Yes or No.
+
+    Returns:
+        The sum of the candidate tokens' conditional log-probabilities.
+        Longer candidates are not length-normalized. An empty encoded
+        candidate has a total score of 0.0.
+
+    Encode the prompt and candidate separately. For each candidate token,
+    compute a stable log-sum-exp over the logits, add that token's log score,
+    and append its known ID to the context for the next step. This scores a
+    fixed continuation rather than choosing new tokens or masking logits.
+    """
     context_ids = model_object.encode(selection_prompt)[0].tolist()
     candidate_ids = model_object.encode(function_name)[0].tolist()
 

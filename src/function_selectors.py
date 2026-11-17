@@ -1,3 +1,10 @@
+"""Choose an available function using name scores and capability checks.
+
+Build chat-formatted selection prompts, score complete candidate names,
+and compare the two leading functions when their scores are close.
+These helpers select a name without extracting or executing arguments.
+"""
+
 from llm_sdk import Small_LLM_Model
 from . import data_models, llm_helpers
 
@@ -6,10 +13,19 @@ def build_function_selector_prompt(
     user_text: str,
     validated_functions: list[data_models.FunctionDefinition],
 ) -> str:
-    """Return instruction text containing the functions and one user request.
+    """Format one request and the available function metadata for selection.
 
-    Read names and descriptions from the supplied validated models.
-    The returned string becomes the starting context for generation.
+    Args:
+        user_text: Original natural-language request to classify.
+        validated_functions: Definitions supplying names, descriptions, and
+            parameter names/types for the displayed function list.
+
+    Returns:
+        One string containing system and user messages followed by an open
+        assistant response. The instruction requests only a function name
+        and explains how to interpret requests containing negation.
+
+    This function prepares text only; it does not call the model.
     """
     available_functions: list = []
     for function in validated_functions:
@@ -58,6 +74,18 @@ def capability_score(
     user_request: str,
     function: data_models.FunctionDefinition,
 ) -> float:
+    """Compare the model's Yes and No scores for one function's suitability.
+
+    Args:
+        model_object: Existing SDK model reused for both scoring calls.
+        user_request: Request whose required capability is being assessed.
+        function: Definition providing the name, description, and parameters.
+
+    Returns:
+        The complete-sequence log score of Yes minus that of No under the
+        capability prompt. A larger value favors a Yes answer; the result
+        is a score difference rather than a normalized confidence percentage.
+    """
     parameters = []
 
     for name, definition in function.parameters.items():
@@ -101,6 +129,26 @@ def hybrid_function_selector(
     user_request: str,
     functions: list[data_models.FunctionDefinition],
 ) -> str:
+    """Select a function by name score, resolving close scores by capability.
+
+    Args:
+        model_object: Existing SDK model used for all scoring operations.
+        user_request: Natural-language request to classify.
+        functions: Available validated function definitions.
+
+    Returns:
+        An available function name. Return the leading candidate directly
+        when it is the only scored candidate or leads by at least 2.0.
+        Otherwise compare the two leaders' capability scores, favoring the
+        original leader when those scores tie.
+
+    Raises:
+        ValueError: No functions are supplied or no best candidate is found.
+
+    Rank names by the sum of their token log-probabilities. The 2.0 margin
+    is a score threshold, not an accuracy percentage. Choosing an available
+    name does not guarantee that its meaning matches every request.
+    """
     if not functions:
         raise ValueError("No available functions.")
 

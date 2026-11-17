@@ -1,20 +1,30 @@
-"""Command-line entry point for loading and validating project inputs."""
+"""Run the command-line function-calling application.
+
+Read paths from CLI options, validate both input files, create one SDK
+model, generate structured calls, and write the resulting JSON array.
+This module calls main() when loaded.
+"""
 
 import argparse
 import sys
 import json
 from pydantic import ValidationError
 
-from . import data_io, data_models, llm_progress_builder
+from . import data_io, data_models, generation_flow
 from llm_sdk import Small_LLM_Model
 
 
 def main() -> None:
-    """Parse paths, validate both input arrays, and print their item counts.
+    """Load the requested inputs, generate calls, and write the output file.
 
-    Display loader errors at this command-line boundary and exit with
-    status 1 on failure. The output path is parsed for later integration
-    with generation and result writing.
+    Read --functions_definition, --input, and --output from the command line,
+    using their configured defaults when omitted. Validate the input arrays
+    before creating a single model shared by all requests. Pass the validated
+    models to generation_flow and then serialize its results through data_io.
+
+    Print contextual messages for handled loading, model initialization,
+    generation, and writing failures, then exit with status 1. Successful
+    execution returns None. Argument parsing handles help and invalid options.
     """
     parser = argparse.ArgumentParser(description="Process some prompts")
 
@@ -113,7 +123,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        model_generation_result = llm_progress_builder.progress_builder(
+        model_generation_result = generation_flow.progress_builder(
             model_object, valid_function_list, valid_prompt_list
         )
     except ValueError as e:
@@ -125,7 +135,7 @@ def main() -> None:
 
     try:
         data_io.write_results(args.output, model_generation_result)
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         print(
             f"[{type(e).__name__}] Error during JSON conversion at "
             f"{args.output}. {e}"
@@ -139,4 +149,5 @@ def main() -> None:
         sys.exit(1)
 
 
-main()
+if __name__ == "__main__":
+    main()

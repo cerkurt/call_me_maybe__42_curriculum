@@ -1,3 +1,11 @@
+"""Build and select a bounded regex catalog and interpret replacement names.
+
+Combine supported character categories with eligible literals from the
+request. Use constrained option-code selection to return a pattern, and
+normalize a small set of unquoted replacement names separately.
+These helpers do not execute the requested text replacement.
+"""
+
 from llm_sdk import Small_LLM_Model
 from . import parameter_extractors, llm_helpers
 
@@ -8,6 +16,21 @@ import string
 def regex_candidate_generator(
     user_request: str, source_string: str
 ) -> dict[str, str]:
+    """Map readable regex categories and eligible literals to patterns.
+
+    Args:
+        user_request: Request from which to collect completed quoted spans.
+        source_string: Text in which a requested pattern should match.
+
+    Returns:
+        A dictionary containing patterns for vowels, letters, digit sequences,
+        uppercase letters, lowercase letters, whitespace, and punctuation.
+        Add each quoted literal that occurs in source_string but is not the
+        whole source, escaping regex metacharacters with re.escape().
+
+    Labels describe patterns for model selection; they are not output regex
+    values themselves. This finite catalog does not cover arbitrary regexes.
+    """
     literals = parameter_extractors.string_splitter_inside_the_quotes(
         user_request
     )
@@ -37,6 +60,23 @@ def generate_regex_pattern(
     source_string: str,
     replacement: str,
 ) -> str:
+    """Choose a catalog pattern using short, constrained option codes.
+
+    Args:
+        model_object: Existing SDK model shared with the calling pipeline.
+        user_request: Request describing the desired match/replacement.
+        source_string: Source text shown to the model as selection context.
+        replacement: Replacement value shown as additional context.
+
+    Returns:
+        The regex string associated with the selected option, not the
+        option's letter or descriptive label.
+
+    Assign successive letters starting at A to catalog labels, encode those
+    letters, and ask generate_name_from_candidates() to choose one within
+    10 tokens. Resolve the selected code to its label and then its pattern.
+    Selection errors propagate; no replacement operation is executed here.
+    """
     open_assistant_start = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
     candidates = regex_candidate_generator(user_request, source_string)
@@ -86,7 +126,22 @@ def generate_regex_pattern(
 def convert_regex_replacement_value(
     user_request: str, replacement: str
 ) -> str:
-    char_name_dict: dict = {
+    """Convert supported unquoted character names following with to symbols.
+
+    Args:
+        user_request: Original request, split without losing quoted chunks.
+        replacement: Extracted replacement string to interpret.
+
+    Returns:
+        The symbol for asterisk(s), hyphen(s), or underscore(s) when an
+        unquoted name immediately follows with and matches replacement,
+        ignoring case. Strip trailing .,!?:; punctuation from that request
+        chunk for comparison. Otherwise return replacement unchanged.
+
+    Quoted names such as 'asterisks' remain literal text. This is a small
+    English with-name rule, not a general natural-language symbol converter.
+    """
+    char_name_dict: dict[str, str] = {
         "asterisk": "*",
         "asterisks": "*",
         "hyphen": "-",

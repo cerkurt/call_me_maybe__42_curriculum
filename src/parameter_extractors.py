@@ -1,3 +1,11 @@
+"""Construct typed argument candidates and shared extraction prompts.
+
+Collect quote-aware string fragments and word n-grams, parse supported
+numeric forms into finite floats, and format the current argument request
+with previously extracted values as context. Candidate building itself
+does not invoke the LLM.
+"""
+
 from . import data_models, llm_helpers
 
 import re
@@ -6,6 +14,19 @@ import math
 
 
 def string_splitter_out_of_quotes(text: str) -> list[str]:
+    """Split text at spaces outside quoted chunks, retaining quote marks.
+
+    Args:
+        text: Natural-language request to divide into chunks.
+
+    Returns:
+        Nonempty chunks in input order. A single or double quote at the
+        beginning of a chunk opens a quoted region; spaces inside that
+        region remain in the same chunk. Outer quote marks are retained.
+
+    Only literal spaces separate chunks here. This is a lightweight request
+    splitter, not a general parser for escaped or nested quote delimiters.
+    """
     completed_parts: list = []
     current_part: list = []
     is_quote_active = None
@@ -31,6 +52,19 @@ def string_splitter_out_of_quotes(text: str) -> list[str]:
 
 
 def string_splitter_inside_the_quotes(text: str) -> list[str]:
+    """Collect completed single- or double-quoted spans without delimiters.
+
+    Args:
+        text: Natural-language request containing possible quoted values.
+
+    Returns:
+        Contents of completed quoted spans in their original order, including
+        empty contents. Unclosed spans are not returned. Outside a span, an
+        apostrophe immediately after a letter or digit does not open one.
+
+    A matching quote closes the current span. Backslash escapes are not
+    interpreted, so this is not a full parser for arbitrary quoted syntax.
+    """
     completed_parts: list = []
     current_part: list = []
     is_quote_active = None
@@ -52,6 +86,23 @@ def string_splitter_inside_the_quotes(text: str) -> list[str]:
 
 
 def string_slicer(user_request: str) -> list[str]:
+    """Build a deduplicated pool of possible string argument values.
+
+    Args:
+        user_request: Original request from which to collect candidates.
+
+    Returns:
+        Candidate strings in first-seen order. Include split chunks with
+        matching outer quotes removed, two- and three-word phrases outside
+        recognized quotes, chunks with trailing .!? removed when changed,
+        and completed quoted contents.
+
+    Skip word n-grams identical to the whole request; do not append the full
+    request as a separate fallback. Individual chunks can still equal it.
+    Quoted empty or long values remain candidates, while arbitrary unquoted
+    values longer than three words are not all enumerated. This function
+    offers possible values without deciding which one a parameter needs.
+    """
     inside_the_quotes_substrings = string_splitter_inside_the_quotes(
         user_request
     )
@@ -95,6 +146,24 @@ def string_slicer(user_request: str) -> list[str]:
 
 
 def extract_numbers_from_user_request(user_request: str) -> list[float]:
+    """Extract supported numeric text as finite floating-point candidates.
+
+    Args:
+        user_request: Request containing possible numeric argument values.
+
+    Returns:
+        Floats in occurrence order, retaining duplicate values. Supported
+        forms include signed integers, decimals with or without a leading
+        zero, comma-grouped thousands, and scientific notation. Grouping
+        commas are removed before conversion. No matches produce an empty
+        list; number words are not converted.
+
+    Raises:
+        ValueError: Conversion produces a non-finite float.
+
+    This helper extracts candidates, not their parameter assignments. Float
+    conversion has the usual precision and range limits.
+    """
     number_pattern = (
         r"(?<![\w.])"
         r"[-+]?"
@@ -127,6 +196,26 @@ def message_for_parameter_extraction(
     given_parameter_name: str,
     extracted_parameters: dict,
 ) -> str:
+    """Format the shared extraction prompt and open JSON argument prefix.
+
+    Args:
+        user_request: Original natural-language request.
+        function_object: Selected definition supplying metadata and types.
+        given_parameter_name: Declared parameter to extract next.
+        extracted_parameters: Previously extracted names and actual values.
+
+    Returns:
+        One string containing system/user messages and an open assistant
+        response ending at the current JSON key's colon. There is no space
+        after the colon; candidate construction supplies the leading space.
+
+    Use a string-specific system instruction for preserving the complete
+    input value, and the general instruction for other types. Add numeric
+    sign guidance or boolean final-state guidance when applicable. Include
+    all declarations and previous arguments as context, then serialize those
+    arguments to start the next JSON entry. The supplied dictionary is not
+    modified, and this function performs no model inference.
+    """
     parameter_type = function_object.parameters[given_parameter_name].type
 
     if parameter_type == "string":

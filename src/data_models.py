@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
-"""Pydantic schemas for function definitions, prompt inputs, and results."""
+"""Define input and output schemas and validate extracted arguments.
+
+Pydantic models describe functions, prompts, and result records. The
+separate parameter checker compares actual argument names and values
+with the selected function's declarations.
+"""
 
 from pydantic import BaseModel
 from typing import Literal
@@ -13,23 +18,32 @@ import math
 
 
 class ParameterDefinition(BaseModel):
-    """Declare the allowed JSON type for one function parameter."""
+    """Declare the supported JSON type of one input argument.
+
+    The type field accepts number, string, or boolean. This is metadata about
+    an expected argument, not the value extracted from a user request.
+    """
 
     type: Literal["number", "string", "boolean"]
 
 
 class ReturnDefinition(BaseModel):
-    """Declare the JSON type of a function's return value."""
+    """Declare the supported JSON type of a function's return value.
+
+    The type field accepts number, string, or boolean. The application records
+    function calls rather than executing them or producing this return value.
+    """
 
     type: Literal["number", "string", "boolean"]
 
 
 class FunctionDefinition(BaseModel):
-    """Describe one available function and its parameter declarations.
+    """Describe an available function and its declared input/output types.
 
-    parameters is a dictionary: keys are parameter names and values are
-    ParameterDefinition objects. Each value exposes its declared type
-    through .type. The function's own name is stored in .name.
+    Store the function name and description alongside a parameter dictionary.
+    Each parameter name maps to a ParameterDefinition instance whose type
+    field declares the expected argument type. The returns field contains a
+    ReturnDefinition instance.
     """
 
     name: str
@@ -39,16 +53,21 @@ class FunctionDefinition(BaseModel):
 
 
 class PromptTest(BaseModel):
-    """Hold one user request from the input prompt array."""
+    """Hold the natural-language request from one input-array entry.
+
+    The prompt field is a string. This model does not require a nonempty
+    request or define an expected function-call result.
+    """
 
     prompt: str
 
 
 class FunctionCallResult(BaseModel):
-    """Hold a structured call with its original prompt and argument values.
+    """Store an original request, selected function name, and argument values.
 
-    Parameter names and value types need separate checks against the
-    selected FunctionDefinition; this model accepts arbitrary values.
+    The parameters dictionary holds extracted values, not ParameterDefinition
+    objects. Its values are typed as object, so parameter_type_checker() must
+    separately verify the selected function's required keys and value types.
     """
 
     prompt: str
@@ -59,6 +78,26 @@ class FunctionCallResult(BaseModel):
 def parameter_type_checker(
     function_object: FunctionDefinition, parameter_dict: dict
 ) -> None:
+    """Check argument keys and Python value types against a function schema.
+
+    Args:
+        function_object: Definition declaring the required argument names
+            and their supported JSON types.
+        parameter_dict: Extracted argument names mapped to actual values.
+
+    Returns:
+        None when every required key is present, no extra keys exist, and all
+        values match their declarations. The dictionary is not modified.
+
+    Raises:
+        ValueError: A key is missing or unexpected, a value has the wrong
+            type, or a number is a non-finite float.
+
+    Number fields accept int or finite float values but reject bool, despite
+    Python treating bool as an int subclass. String and boolean fields require
+    str and bool respectively. This checks schema compliance, not whether a
+    value correctly represents the user's intended argument.
+    """
     parameters_from_function: list = []
     for parameter_name, parameter_type in function_object.parameters.items():
         parameters_from_function.append(parameter_name)

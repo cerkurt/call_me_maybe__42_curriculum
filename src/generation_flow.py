@@ -1,4 +1,9 @@
-"""Build selection prompts and generate text or constrained function names."""
+"""Coordinate function selection and typed argument extraction per request.
+
+Reuse a caller-provided SDK model and validated inputs to build result
+models. File loading, model construction, and output writing remain the
+responsibility of the caller.
+"""
 
 from llm_sdk import Small_LLM_Model
 from . import (
@@ -17,6 +22,37 @@ def progress_builder(
     validated_function_list: list[data_models.FunctionDefinition],
     validated_prompt_list: list[data_models.PromptTest],
 ) -> list[data_models.FunctionCallResult]:
+    """Build structured function-call results for the supplied prompt models.
+
+    Args:
+        model_object: Existing SDK model shared by selection and extraction.
+        validated_function_list: Available function definitions and schemas.
+        validated_prompt_list: PromptTest instances to process in order.
+
+    Returns:
+        Collected FunctionCallResult instances in request order. Each result
+        retains its original prompt and a parameter dictionary ordered like
+        the selected definition.
+
+    For each request, select a function with the hybrid selector and extract
+    its arguments from typed candidate pools. Numbers come from the request,
+    strings from the string slicer, and booleans from True/False candidates.
+    Serialize candidates with a leading space and use token constraints to
+    select each value, passing earlier arguments as extraction context.
+
+    Definitions with source_string, regex, and replacement all declared as
+    string use the regex helpers after source/replacement extraction. Skip
+    ordinary extraction of regex, normalize supported replacement names, and
+    then select a pattern. Check all keys and types before collecting a result.
+
+    Raises:
+        ValueError: Selection or constrained generation fails, no numeric
+            candidate exists, a parameter type is unsupported, or final
+            argument validation fails. Helper errors propagate to the caller.
+
+    An empty prompt list returns an empty list. The function performs no file
+    I/O and does not execute the selected application functions.
+    """
     list_to_write: list = []
 
     for prompt in validated_prompt_list:
@@ -27,6 +63,7 @@ def progress_builder(
             user_request,
             validated_function_list,
         )
+
         for function in validated_function_list:
             if function.name == result_function_name:
                 regex_fields = {"source_string", "regex", "replacement"}

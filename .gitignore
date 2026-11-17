@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 to-do-list.txt
 test_inputs/
+data/output/

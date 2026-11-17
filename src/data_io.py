@@ -1,16 +1,31 @@
-"""Read JSON inputs, validate their objects, and write model results."""
+"""Load UTF-8 JSON arrays, validate input models, and serialize results.
+
+Keep file handling separate from model inference. Input errors propagate
+to callers; result serialization finishes before the output file opens.
+"""
 
 import json
+from pathlib import Path
+
 from pydantic import BaseModel
 from . import data_models
 
 
 def load_json_file(path: str) -> list:
-    """Read a JSON array from path and return its contents as a Python list.
+    """Read a UTF-8 JSON file whose root must be an array.
 
-    The with block closes the file even when parsing fails. File errors
-    and JSONDecodeError propagate to the caller. Raise ValueError if the
-    parsed root value is not a list.
+    Args:
+        path: Path to the input JSON file.
+
+    Returns:
+        The parsed array as a Python list. Elements are not validated here.
+
+    Raises:
+        ValueError: The parsed root is not a list.
+        json.JSONDecodeError: The file does not contain valid JSON.
+        OSError: The file cannot be opened or read.
+
+    The context manager closes the file even when parsing fails.
     """
     with open(path, "r", encoding="utf-8") as file_to_load:
         loaded_file = json.load(file_to_load)
@@ -22,13 +37,23 @@ def load_json_file(path: str) -> list:
 
 
 def model_validation(path: str, model_class: type[BaseModel]) -> list:
-    """Load JSON dictionaries and return instances of the supplied model.
+    """Load dictionary entries and construct the requested Pydantic models.
 
-    model_class is a Pydantic model class, such as FunctionDefinition or
-    PromptTest. Construct one instance for each dictionary in the array.
-    Raise ValueError for non-dictionary elements and propagate model
-    validation errors. The first error stops loading; no partial list
-    is returned.
+    Args:
+        path: Path to a JSON array of objects.
+        model_class: Pydantic model class used to validate each object.
+
+    Returns:
+        A list of model instances, preserving the input order.
+
+    Raises:
+        ValueError: An entry is not a dictionary. When model_class is exactly
+            FunctionDefinition, also reject an empty list, blank function
+            names, or duplicate names.
+        pydantic.ValidationError: An entry violates the requested model.
+
+    File and JSON parsing errors propagate from load_json_file(). Validation
+    stops at the first error; no partial result list is returned.
     """
     json_file = load_json_file(path)
 
@@ -43,26 +68,67 @@ def model_validation(path: str, model_class: type[BaseModel]) -> list:
         valid_data = model_class(**list_element)
         valid_list.append(valid_data)
 
+    if model_class is data_models.FunctionDefinition:
+        if not valid_list:
+            raise ValueError(
+                "model_validation(). Function list cannot be empty."
+            )
+
+        function_names = []
+
+        for function in valid_list:
+            if isinstance(function, data_models.FunctionDefinition):
+                if not function.name.strip():
+                    raise ValueError("Function name cannot be empty.")
+
+                if function.name in function_names:
+                    raise ValueError(
+                        f"model_validation(). "
+                        f"Duplicate function name: {function.name}"
+                    )
+
+                function_names.append(function.name)
+
     return valid_list
 
 
 def write_results(
     path: str, results: list[data_models.FunctionCallResult]
 ) -> None:
-    """Write result models as one indented JSON array, replacing the file.
+    """Serialize result models as a UTF-8 JSON array and replace the file.
 
-    model_dump() converts a Pydantic instance to a Python dictionary.
-    json.dump() writes the collected dictionaries to the opened file.
-    The parent directory must already exist; file errors reach the caller.
+    Args:
+        path: Destination file path. Missing parent directories are created.
+        results: FunctionCallResult instances to convert with model_dump().
+
+    Returns:
+        None after writing the indented JSON array.
+
+    Raises:
+        ValueError: Serialization encounters a non-finite numeric value.
+        TypeError: A dumped value cannot be serialized as JSON.
+        OSError: A parent directory or the output file cannot be created or
+            written.
+
+    Prepare the complete text with json.dumps() before creating directories
+    or opening the file. A serialization failure therefore leaves an existing
+    file untouched. Successful writing replaces its previous contents and
+    preserves literal Unicode characters with ensure_ascii=False.
     """
     model_to_dict_list = []
+
     for model in results:
         result_dict = model.model_dump()
         model_to_dict_list.append(result_dict)
 
     json_text = json.dumps(
-        model_to_dict_list, ensure_ascii=False, allow_nan=False, indent=4
+        model_to_dict_list,
+        ensure_ascii=False,
+        allow_nan=False,
+        indent=4,
     )
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w", encoding="utf-8") as file:
         file.write(json_text)
