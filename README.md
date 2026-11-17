@@ -78,13 +78,8 @@ uv sync
 ```
 
 The current writer creates missing parent directories automatically with
-`Path(path).parent.mkdir(parents=True, exist_ok=True)`. A separate `mkdir`
-step is unnecessary for normal execution.
-
-`data/output/` is generated locally and must not be included in the submitted
-repository. The ignore rule prevents new untracked outputs from being added
-normally; it does not remove files already tracked by Git. Before submitting,
-check that `git ls-files data/output` returns no tracked output files.
+`Path(path).parent.mkdir(parents=True, exist_ok=True)`. `data/output/` is generated 
+locally and must not be included in the submitted repository.
 
 ### Run the provided 11-prompt input (standard CLI)
 
@@ -134,47 +129,11 @@ uv run python -m src \
   --output data/output/custom_results.json
 ```
 
-The extended fixtures are optional development files, not official
-evaluation data. In the current workspace they are **outside** the repository:
-
-```text
-call_me_maybe/
-├── project_repo/           # Run the CLI here
-├── test_inputs/            # Local 55- and 31-request fixtures
-└── combined_evaluation/    # Local 76-request fixture and stored report
-```
-
-For the local 55-request fixture, run from `project_repo/`:
-
-```bash
-uv run python -m src \
-  --functions_definition ../test_inputs/mandatory_functions.json \
-  --input ../test_inputs/mandatory_prompts.json \
-  --output data/output/mandatory_results.json
-```
-
-For the local combined definitions and requests:
-
-```bash
-uv run python -m src \
-  --functions_definition ../combined_evaluation/combined_functions.json \
-  --input ../combined_evaluation/combined_prompts.json \
-  --output data/output/combined_cli_results.json
-```
-
 The normal CLI stops the batch on a processing error. It does not continue
 past a failed request, unlike the historical per-request diagnostic runner.
 The combined CLI command can therefore stop without writing a new file.
 These parent-directory fixtures are not available in a fresh clone unless
 supplied separately; the default `data/input/` files are the portable example.
-
-The stored combined report was produced with a runner that catches errors
-per request while reusing one model. Its current local script is **not ready
-to rerun unchanged**: it resolves the project location from an older layout
-and searches for `src.llm_progress_builder` or `src.generators`, whereas the
-current pipeline is `src.generation_flow`. Update those runner references
-before using it; this README does not present its old command as a working
-entry point for the current checkout.
 
 ### CLI help and inspection
 
@@ -190,7 +149,7 @@ types, exhausted generation, and output-writing errors are reported at the CLI
 boundary. Handled errors return a nonzero status and a descriptive message.
 
 Input validation also rejects empty function definition lists and duplicate function
-names (tested as of November 17). An empty prompt **list** is allowed; a prompt
+names. An empty prompt **list** is allowed; a prompt
 containing an empty **string** is distinct from an empty list.
 
 The constrained decoder prevents out-of-candidate continuations, but it cannot
@@ -212,12 +171,7 @@ uv run mypy . \
 
 The included Makefile provides `make install`, `make run`, `make debug`,
 `make clean`, and `make lint`. `make run` also prints elapsed time through
-`/usr/bin/time -p`. The optional `make lint-strict` runs mypy with `--strict`;
-passing the mandatory flags does not imply that this stronger mode passes.
-
-The development lint errors reported in the older November 16 snapshot have
-since been addressed; both flake8 and the mandatory mypy flags were reported
-clean during the November 17 review. Re-run them on the final committed tree.
+`/usr/bin/time -p`. The optional `make lint-strict` runs mypy with `--strict`.
 
 ## Input and output formats
 
@@ -276,21 +230,45 @@ fields:
 | `name` | The selected function name. |
 | `parameters` | The complete dictionary of extracted argument values. |
 
-Numbers and booleans are JSON values rather than quoted type names:
+### JSON value types
+
+Parameter types are declared as `"number"`, `"string"`, or `"boolean"` in the 
+function definitions. However, the generated output contains actual JSON values, 
+not their type names.
+
+For example:
 
 ```json
-{
-    "prompt": "Disable notifications for room 'kitchen'.",
-    "name": "set_notifications",
-    "parameters": {
-        "room": "kitchen",
-        "enabled": false
+[
+    {
+        "prompt": "Set the temperature to 18 degrees for room 'office'.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "office",
+            "degrees": 18.0
+        }
+    },
+    {
+        "prompt": "Disable notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": false
+        }
     }
-}
+]
 ```
 
-Both `7` and `7.0` satisfy the declared `number` type. The current numeric
-extractor converts matching text into Python floats.
+In the output:
+
+- `"office"` and `"kitchen"` are JSON strings.
+- `18.0` is a JSON number, not a quoted string.
+- `false` is a JSON boolean, not the string `"false"`.
+
+The numeric extractor converts matching numeric text into Python float values. 
+For example, the number 18 in the user's request becomes 18.0 in the generated 
+JSON output. Both integer and floating-point JSON numbers are valid for 
+parameters declared as "number".
 
 ## Project structure
 
@@ -307,8 +285,7 @@ The repository separates application responsibilities into these modules:
 │   ├── function_selectors.py   # Name ranking and capability reranking
 │   ├── parameter_extractors.py # String/number pools and argument prompts
 │   ├── llm_helpers.py          # Chat formatting, token masks, name scores
-│   ├── regex_helpers.py        # Pattern options and replacement conversion
-│   └── old_function_helpers.py # Earlier experiments outside the CLI path
+│   └──regex_helpers.py         # Pattern options and replacement conversion
 ├── data/
 │   ├── input/                  # Default demonstration definitions/prompts
 │   └── output/                 # Generated locally; exclude from submission
@@ -323,24 +300,14 @@ The repository separates application responsibilities into these modules:
 ```
 
 `__main__.py` calls `generation_flow.progress_builder()`. The flow module
-uses the selector, extractor, regex, and shared LLM helpers. It does not
-import `old_function_helpers.py`; that module retains the earlier decoding
-experiments. The former `generators.py`, `llm_progress_builder.py`, and
-repository-root `sdk_playground.py` are not current application entry points.
-
-Local test fixtures in `../test_inputs/` and `../combined_evaluation/` are
-outside this tree. A `docs/architecture/` export directory is not currently
-included in this checkout.
+uses the selector, extractor, regex, and shared LLM helpers.
 
 ## Architecture diagram
 
-An external editable diagram is available on
+An external diagram is available on
 [FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?t=VYSTQmxtIs2KLD0C-1).
-The board's contents were not verified against the current source during
-this review. Its previously referenced PDF export and four PNG previews
-are not present in `docs/architecture/`, so no missing local image links
-are included here. The repository-contained Mermaid diagrams below describe
-the source-code flow without requiring those exports.
+The shortened version of the same Mermaid diagram from the FigJam file 
+describes the source-code flow visually.
 
 ## Algorithm explanation
 
@@ -463,7 +430,7 @@ are 0.2 and 3.0 respectively, the second candidate replaces the original
 leader. With scores -1.0 and -4.0, the margin is 3.0 and no extra check runs.
 These numbers explain control flow; they are not measured test outputs.
 
-#### Why the extra stage was introduced, and what it costs
+#### Why the extra stage was introduced, and what it costs?
 
 The additional question separates two judgments: how likely the function's
 name is as a continuation of the selection prompt, and whether that
@@ -485,11 +452,10 @@ to revise an ambiguous ranking. The recorded hybrid tests show its actual
 successes and failures, but there is no controlled full-score-only versus
 hybrid benchmark here proving how much accuracy the extra stage adds.
 
-The **2.0** threshold is a score-difference heuristic, not 90% confidence
-and not the subject's 90% accuracy target. It can skip a useful capability
-check, and only the top two names are reconsidered. In the stored `NEW-10`
-diagnostic, the correct reminder function ranked fifth and the first two
-names were separated by 2.2146, so the normal hybrid path did not reconsider
+The **2.0** threshold is a score-difference heuristic. It can skip a useful 
+capability check, and only the top two names are reconsidered. In the extra 
+tests diagnostic, the correct function ranked fifth, and the first two names 
+were separated by 2.2146, so the normal hybrid path did not reconsider
 the correct function. These limits are retained rather than changing the
 algorithm during documentation review.
 
@@ -498,10 +464,7 @@ algorithm during documentation review.
 Function selection returns a name from the supplied definitions by scoring
 fixed names and, when needed, capability answers. After that, argument
 values and regex option codes use `generate_name_from_candidates()` with
-token-prefix constraints and logit masking. The similar helper names do
-not mean that function selection and argument generation execute the same
-algorithm. The old standalone `generate_name_by_full_scoring()` helper is
-commented out; active full scoring occurs inside the hybrid selector.
+token-prefix constraints and logit masking.
 
 ### 2. Determine parameter extraction strategy
 
@@ -572,8 +535,7 @@ ordinary parameters have been visited.
 
 A constrained output is **guaranteed to be selected from the supplied
 candidates when generation succeeds**, but it is not guaranteed to be
-the semantically correct choice. The `Ceren Kurt` failure demonstrates
-this distinction.
+the semantically correct choice.
 
 ### 4. Complete regex parameters when recognized
 
@@ -616,14 +578,6 @@ Pydantic and the final parameter checker validate **structure and types**.
 They cannot prove that a chosen function or argument corresponds to the
 user's intended meaning. This is why semantic comparisons against expected
 calls are included in the test strategy.
-
-### Historical experiments
-
-Earlier development also explored unrestricted JSON-string generation and
-quote/escape/unicode state machines (`get_json_string_state()`,
-`find_allowed_string_token_ids()`, and `generate_json_string()`). These
-experiments informed debugging but are not the current parameter-value
-production path.
 
 ## Design decisions
 
