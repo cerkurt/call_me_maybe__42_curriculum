@@ -12,6 +12,7 @@ token-by-token constrained decoding.
 - [Instructions](#instructions)
 - [Input and output formats](#input-and-output-formats)
 - [Project structure](#project-structure)
+- [Architecture diagram](#architecture-diagram)
 - [Algorithm explanation](#algorithm-explanation)
 - [Design decisions](#design-decisions)
 - [Challenges encountered](#challenges-encountered)
@@ -49,131 +50,176 @@ declarations are `number`, `string`, and `boolean`.
 
 The supplied `Small_LLM_Model` SDK loads `Qwen/Qwen3-0.6B` by default.
 The application uses its public encoding, decoding, and logit methods.
-At each generation step, invalid candidate continuations are masked before
-the next token is selected.
+During argument extraction and regex option selection, invalid candidate
+continuations are masked before the next token is selected. Function-name
+selection instead scores complete available names and may rerank the two
+leaders with a separate capability prompt.
 
-**Development snapshot — November 16, 2026:** argument extraction now uses
-one shared, type-aware prompt builder. The string candidate pool includes
-quoted values, individual words, two- and three-word phrases, and the full
-request. Regex arguments have a separate constrained category-selection
-step. Current measurements and remaining semantic errors are recorded under
-[Testing strategy](#testing-strategy); passing schema checks alone does not
-establish that a call has the intended meaning.
+**Current documentation snapshot — November 17, 2026:** The implementation uses
+hybrid full-sequence/capability scoring for function selection and finite-candidate,
+token-level constrained decoding for argument extraction. Testing now includes the
+original 11-prompt input, a 55-prompt regression set, a separate 31-prompt
+seven-function generalization set, and a curated 76-prompt combined regression set.
+See [Testing strategy](#testing-strategy) for exact results and limitations.
+
 
 ## Instructions
 
 ### Requirements and installation
 
-- Python 3.10 or newer, as declared in `pyproject.toml`.
+- Python **3.10+**, as specified by `pyproject.toml` and the subject.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/).
-- The supplied `llm_sdk` workspace directory.
-- Internet access for the initial dependency and model downloads.
+- The supplied `llm_sdk/` workspace package.
+- Internet access for first-time dependency and model downloads; cached model files
+  are reused in later runs.
 
-The recorded local checks used Python **3.14.4** on macOS.
-
-Run these commands from the repository root, alongside `pyproject.toml`:
+Install the workspace dependencies from the repository root:
 
 ```bash
 uv sync
-mkdir -p data/output
 ```
 
-The first model initialization downloads model and tokenizer files.
-Subsequent runs can reuse the local model cache. Download time is separate
-from the cached-model performance measurement below.
+The current writer creates missing parent directories automatically with
+`Path(path).parent.mkdir(parents=True, exist_ok=True)`. A separate `mkdir`
+step is unnecessary for normal execution.
 
-The outer `llm_sdk` directory is a uv workspace package. Its inner
-`llm_sdk` directory is the Python import package. Once uv installs the
-workspace, the public import is:
+`data/output/` is generated locally and must not be included in the submitted
+repository. The ignore rule prevents new untracked outputs from being added
+normally; it does not remove files already tracked by Git. Before submitting,
+check that `git ls-files data/output` returns no tracked output files.
 
-```python
-from llm_sdk import Small_LLM_Model
-```
-
-### Default execution
+### Run the provided 11-prompt input (standard CLI)
 
 ```bash
 uv run python -m src
 ```
 
-Default paths:
-
-| CLI option | Default |
-|---|---|
-| `--functions_definition` | `data/input/functions_definition.json` |
-| `--input` | `data/input/function_calling_tests.json` |
-| `--output` | `data/output/function_calling_results.json` |
-
-The output directory must exist. The writer opens the selected output file
-in write mode, replacing its previous contents after generation succeeds.
-
-### Custom paths and example usage
-
-Run the additional test set:
+Equivalent explicit form:
 
 ```bash
 uv run python -m src \
-    --functions_definition ../test_inputs/mandatory_functions.json \
-    --input ../test_inputs/mandatory_prompts.json \
-    --output data/output/mandatory_results.json
+  --functions_definition data/input/functions_definition.json \
+  --input data/input/function_calling_tests.json \
+  --output data/output/function_calling_results.json
 ```
 
-Despite their development names, these `mandatory_*` files are a local test
-set assembled during implementation, not an official evaluation dataset.
-In the current workspace, `test_inputs/` is beside `project_repo/`, one
-directory above the repository root. These local fixtures are not a
-guaranteed part of a fresh clone; supply your own files or use the default
-files in `data/input/` if they are unavailable.
+The standard command processes the whole list and writes **one JSON array**.
+A processing error stops that batch rather than automatically skipping the prompt.
 
-Display CLI help:
+### Run one custom prompt immediately
+
+Prepare a one-request JSON list, using the existing default function definitions:
+
+```bash
+printf '[{"prompt":"What is the sum of 40 and 2?"}]\n' > /tmp/cmm_one_prompt.json
+
+uv run python -m src \
+  --functions_definition data/input/functions_definition.json \
+  --input /tmp/cmm_one_prompt.json \
+  --output data/output/one_prompt_result.json
+
+uv run python -m json.tool data/output/one_prompt_result.json
+```
+
+You can replace the text in `/tmp/cmm_one_prompt.json` with another request;
+keep the `[{"prompt": "..."}]` input structure. Escape quotes appropriately.
+
+### Run tests using different function definitions
+
+The CLI does not depend on hardcoded function names. It accepts function definitions,
+prompts, and output paths independently:
+
+```bash
+uv run python -m src \
+  --functions_definition path/to/functions.json \
+  --input path/to/prompts.json \
+  --output data/output/custom_results.json
+```
+
+The extended fixtures are optional development files, not official
+evaluation data. In the current workspace they are **outside** the repository:
+
+```text
+call_me_maybe/
+├── project_repo/           # Run the CLI here
+├── test_inputs/            # Local 55- and 31-request fixtures
+└── combined_evaluation/    # Local 76-request fixture and stored report
+```
+
+For the local 55-request fixture, run from `project_repo/`:
+
+```bash
+uv run python -m src \
+  --functions_definition ../test_inputs/mandatory_functions.json \
+  --input ../test_inputs/mandatory_prompts.json \
+  --output data/output/mandatory_results.json
+```
+
+For the local combined definitions and requests:
+
+```bash
+uv run python -m src \
+  --functions_definition ../combined_evaluation/combined_functions.json \
+  --input ../combined_evaluation/combined_prompts.json \
+  --output data/output/combined_cli_results.json
+```
+
+The normal CLI stops the batch on a processing error. It does not continue
+past a failed request, unlike the historical per-request diagnostic runner.
+The combined CLI command can therefore stop without writing a new file.
+These parent-directory fixtures are not available in a fresh clone unless
+supplied separately; the default `data/input/` files are the portable example.
+
+The stored combined report was produced with a runner that catches errors
+per request while reusing one model. Its current local script is **not ready
+to rerun unchanged**: it resolves the project location from an older layout
+and searches for `src.llm_progress_builder` or `src.generators`, whereas the
+current pipeline is `src.generation_flow`. Update those runner references
+before using it; this README does not present its old command as a working
+entry point for the current checkout.
+
+### CLI help and inspection
 
 ```bash
 uv run python -m src --help
+uv run python -m json.tool data/output/function_calling_results.json
 ```
-
-Inspect a generated file:
-
-```bash
-uv run python -m json.tool data/output/mandatory_results.json
-```
-
-Parsing a file is one check. Required keys, declared types, and the intended
-argument values also need verification.
 
 ### Error handling
 
-The CLI reports input-file errors, malformed JSON, Pydantic validation
-failures, candidate-generation errors, and output-file errors. Handled
-failures exit with status `1`; successful runs exit with status `0`.
+Malformed JSON, missing files, Pydantic validation failures, unsupported parameter
+types, exhausted generation, and output-writing errors are reported at the CLI
+boundary. Handled errors return a nonzero status and a descriptive message.
 
-Examples include:
+Input validation also rejects empty function definition lists and duplicate function
+names (tested as of November 17). An empty prompt **list** is allowed; a prompt
+containing an empty **string** is distinct from an empty list.
 
-- A missing definitions or prompts file.
-- A JSON root that is not a list.
-- A list member that is not a dictionary.
-- A missing required model field.
-- No allowed candidate continuation.
-- An exhausted generation token budget.
-- A numeric conversion that produces infinity, or a non-finite output value.
-- An unavailable output directory or an output path that is a directory.
-
-Input loading and generation finish before the output writer is called.
-The writer also serializes the complete result before opening the file.
-A failure before writing, including a JSON conversion error, leaves an
-existing output file in place.
-Check the command's exit status when evaluating a run.
+The constrained decoder prevents out-of-candidate continuations, but it cannot
+guarantee that the model will choose the semantically correct candidate.
 
 ### Code-quality checks
 
+The subject's mandatory `lint` check includes flake8 and all of these mypy flags:
+
 ```bash
-uv run mypy .
 uv run --with flake8 flake8 .
+uv run mypy . \
+  --warn-return-any \
+  --warn-unused-ignores \
+  --ignore-missing-imports \
+  --disallow-untyped-defs \
+  --check-untyped-defs
 ```
 
-Mypy is declared in the development dependencies. The `--with flake8` form
-makes flake8 available for that invocation without requiring a global
-installation. Both tools exclude the supplied SDK implementation through
-the repository configuration.
+The included Makefile provides `make install`, `make run`, `make debug`,
+`make clean`, and `make lint`. `make run` also prints elapsed time through
+`/usr/bin/time -p`. The optional `make lint-strict` runs mypy with `--strict`;
+passing the mandatory flags does not imply that this stronger mode passes.
+
+The development lint errors reported in the older November 16 snapshot have
+since been addressed; both flake8 and the mandatory mypy flags were reported
+clean during the November 17 review. Re-run them on the final committed tree.
 
 ## Input and output formats
 
@@ -250,59 +296,89 @@ extractor converts matching text into Python floats.
 
 ## Project structure
 
+The repository separates application responsibilities into these modules:
+
 ```text
 .
+├── src/
+│   ├── __init__.py             # Package description
+│   ├── __main__.py             # CLI paths, model initialization, errors
+│   ├── data_io.py              # JSON loading, model validation, writing
+│   ├── data_models.py          # Schemas and final argument-key/type checks
+│   ├── generation_flow.py      # Per-request selection/extraction pipeline
+│   ├── function_selectors.py   # Name ranking and capability reranking
+│   ├── parameter_extractors.py # String/number pools and argument prompts
+│   ├── llm_helpers.py          # Chat formatting, token masks, name scores
+│   ├── regex_helpers.py        # Pattern options and replacement conversion
+│   └── old_function_helpers.py # Earlier experiments outside the CLI path
+├── data/
+│   ├── input/                  # Default demonstration definitions/prompts
+│   └── output/                 # Generated locally; exclude from submission
+├── llm_sdk/                    # Supplied uv workspace dependency
 ├── pyproject.toml
 ├── uv.lock
+├── Makefile
 ├── .flake8
-├── src/
-│   ├── __main__.py       # CLI and application orchestration
-│   ├── data_models.py    # Pydantic models and result-key/type checks
-│   ├── data_io.py        # JSON loading, model validation, result writing
-│   └── generators.py     # Prompts, candidate extraction and token selection
-├── data/
-│   ├── input/           # Definitions and request sets
-│   └── output/          # Generated result arrays
-├── llm_sdk/             # Supplied uv workspace package
-│   └── llm_sdk/
-│       └── __init__.py
-└── sdk_playground.py    # Manually selected SDK/decoding experiments
+├── .gitignore
+├── call_me_maybe_v1_5.pdf
+└── README.md
 ```
 
-The CLI imports the reusable `src` modules. Playground experiments remain
-outside the production entry point.
-The local extended fixtures are currently in `../test_inputs/`, outside
-this repository. The earlier `test_validate.py` scratch file has been
-removed from the working tree.
+`__main__.py` calls `generation_flow.progress_builder()`. The flow module
+uses the selector, extractor, regex, and shared LLM helpers. It does not
+import `old_function_helpers.py`; that module retains the earlier decoding
+experiments. The former `generators.py`, `llm_progress_builder.py`, and
+repository-root `sdk_playground.py` are not current application entry points.
+
+Local test fixtures in `../test_inputs/` and `../combined_evaluation/` are
+outside this tree. A `docs/architecture/` export directory is not currently
+included in this checkout.
+
+## Architecture diagram
+
+An external editable diagram is available on
+[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?t=VYSTQmxtIs2KLD0C-1).
+The board's contents were not verified against the current source during
+this review. Its previously referenced PDF export and four PNG previews
+are not present in `docs/architecture/`, so no missing local image links
+are included here. The repository-contained Mermaid diagrams below describe
+the source-code flow without requiring those exports.
 
 ## Algorithm explanation
 
-### End-to-end flow
+### End-to-end overview
 
 ```mermaid
 flowchart TD
-    A["Definitions and prompt files"] --> B["Load JSON and validate models"]
-    B --> C["Create one shared SDK model"]
-    C --> D["Select a function with token constraints"]
-    D --> E["Select each typed argument"]
-    E --> R["For recognized regex schemas: select pattern and normalize replacement"]
-    R --> F["Check required keys and value types"]
-    F --> G["Collect FunctionCallResult objects"]
-    G --> H["Write one JSON array"]
+  A[Load JSON inputs] --> B[Validate with Pydantic]
+  B --> C[Initialize one SDK model]
+  C --> D[For each user request]
+  D --> E[Hybrid function selection]
+  E --> F[Find selected FunctionDefinition]
+  F --> G[Extract each typed parameter from candidate pool]
+  G --> H[Optional regex post-processing]
+  H --> I[Validate parameters and create FunctionCallResult]
+  I --> J{More requests?}
+  J -->|Yes| D
+  J -->|No| K[Write one JSON array]
 ```
 
-`progress_builder()` manages the request loop. Function-name encodings are
-prepared once for the supplied definitions. Each request receives its own
-parameter dictionary; one result is collected after all its parameters
-have been extracted and checked.
+`progress_builder()` orchestrates the requests. It does not execute
+functions; it produces descriptions of calls. It reuses the same
+`Small_LLM_Model` instance across requests.
 
-### 1. Format the model input
+### 1. Select the function: full scoring inside the hybrid selector
 
-Selection prompts contain the available names and descriptions, followed by
-the actual request. They are wrapped in system and user messages, then an
-open assistant response.
+**Full scoring and hybrid selection are connected stages of one selector,
+not two independent modes selected by a CLI flag.** For every request,
+`generation_flow.progress_builder()` calls
+`function_selectors.hybrid_function_selector()`. That function first ranks
+every available function by a full-sequence score. Only a close result
+triggers the additional capability comparison.
 
-The current assistant prefix is:
+`build_function_selector_prompt()` includes the actual request and the
+supplied function names, descriptions, and parameter names/types. System
+and user chat messages are followed by the open assistant prefix:
 
 ```text
 <|im_start|>assistant
@@ -312,204 +388,244 @@ The current assistant prefix is:
 
 ```
 
-The closing user-message marker is present; the assistant response remains
-open for generation. These role and generation markers follow the
-model-specific chat format discussed in the
-[chat-template documentation](https://huggingface.co/docs/transformers/main/en/chat_templating).
+#### A. Full scoring: compare each complete function name
 
-The SDK returns an encoded tensor with a batch dimension, such as shape
-`(1, N)`. Selecting `[0]` and calling `.tolist()` provides the flat token-ID
-list expected by `get_logits_from_input_ids()`.
-
-Two token histories have different responsibilities:
-
-- `all_token_ids` contains the prompt and generated continuation, providing
-  context to the model.
-- `generated_token_ids` contains only the continuation, providing the prefix
-  used for candidate matching.
-
-### 2. Find allowed next token IDs
-
-Each candidate function name is encoded into a token-ID sequence.
-A candidate remains possible when its initial IDs match the entire
-generated prefix.
-
-For illustration, assume these invented IDs:
+`llm_helpers.score_function_candidate()` evaluates a **known continuation**.
+It encodes one function name and scores all its tokens in order. At each
+step it obtains logits, converts the specified token's score into a log
+probability, then appends that specified token to the context to score
+the next one. It does not select the highest-logit token at that step.
+The prompt context is reset before evaluating the next candidate name.
 
 ```text
-function_a → [10, 20]
-function_b → [10, 30]
+name_score = sum of log P(token_i | prompt and earlier name tokens)
 ```
 
-| Generated prefix | Allowed next IDs |
-|---|---|
-| `[]` | `{10}` |
-| `[10]` | `{20, 30}` |
-| `[10, 20]` | Completed candidate: `function_a` |
+The code computes the normalization with a stable log-sum-exp calculation:
+it subtracts the largest logit before exponentiation. The final score is
+a sum of conditional log-probabilities, not a percentage. A larger score
+is better; for example, -1.2 ranks above -4.6. Scores are not divided by
+the number of tokens, so candidate-name length can affect ranking.
 
-The next position is the length of the generated prefix. Completion is
-checked against the whole candidate sequence, including after the final
-permitted generation step.
+Why compare complete names? The earlier greedy decoder committed to the
+strongest allowed next token before evaluating the rest of each possible
+name. A locally preferred token does not necessarily begin the strongest
+complete continuation. Consider these **invented** scores after a shared
+prefix, with two tokens left in each candidate:
 
-This is implemented by `find_allowed_next_token_ids()` and
-`generate_name_from_candidates()`. The latter is also reused for argument
-candidates despite its original function-name-oriented name.
+| Candidate | First differing token | Following token | Total |
+|---|---:|---:|---:|
+| A | -0.6 | -4.0 | -4.6 |
+| B | -1.0 | -0.2 | -1.2 |
 
-### 3. Mask logits and select a token
+Greedy selection would take A's first differing token because -0.6 is
+higher than -1.0. Full scoring evaluates both complete continuations and
+prefers B. This gives every supplied name a complete evaluation without
+allowing an invented name. It is a different selection criterion, not a
+guarantee that the model's preferred name has the right meaning.
 
-The model returns a logit for each output-vocabulary position. A logit is a
-raw next-token score; it is not a token ID or a normalized probability.
+#### B. Hybrid selection: use an extra check when the leaders are close
 
-`select_next_token_id()` replaces disallowed scores with negative infinity
-while preserving every position in the vector. It then selects the index
-of the largest remaining score.
+The selector retains the best and second-best full scores and calculates:
 
 ```text
-Original logits: [9.0, 7.0, 5.0]
-Allowed IDs:     [1, 2]
-Masked logits:   [-inf, 7.0, 5.0]
-Selected ID:     1
+margin = best_score - second_score
 ```
 
-Keeping positions intact matters: compressing the vector to `[7.0, 5.0]`
-would make index `0` refer to a different token.
+```mermaid
+flowchart TD
+    A[Score every complete available function name] --> B{Second candidate exists?}
+    B -->|No| C[Return the only scored candidate]
+    B -->|Yes| D{Score margin at least 2.0?}
+    D -->|Yes| E[Return the best full-score candidate]
+    D -->|No| F[Capability check for the top two candidates]
+    F --> G[Compare Yes score minus No score]
+    G --> H[Return the higher capability score]
+```
 
-The chosen ID is appended to both histories. Allowed continuations are
-recomputed at the next step.
+A gap of at least **2.0** returns the full-score leader directly. A smaller
+gap runs `capability_score()` for each of the top two definitions. This
+helper prepares a separate prompt asking whether that one function can
+fulfill the request using suitable arguments. It includes the function's
+description and parameter declarations. The same SDK model then scores
+the fixed answers `Yes` and `No`:
 
-### 4. Build typed argument candidates and one shared extraction prompt
+```text
+capability = full_score(Yes) - full_score(No)
+```
 
-The production pipeline currently uses a finite set of possible values:
+The code scores **both** answers; it does not need to freely generate a
+Yes/No explanation. The larger difference wins. If capability scores
+tie, the original full-score leader wins. The original leader is also
+returned when it is the only candidate after scoring.
+
+For an **illustrative** example, full scores -2.1 and -2.8 have a margin
+of 0.7, which triggers the extra check. If the capability differences
+are 0.2 and 3.0 respectively, the second candidate replaces the original
+leader. With scores -1.0 and -4.0, the margin is 3.0 and no extra check runs.
+These numbers explain control flow; they are not measured test outputs.
+
+#### Why the extra stage was introduced, and what it costs
+
+The additional question separates two judgments: how likely the function's
+name is as a continuation of the selection prompt, and whether that
+function's described capability fits the request. Requests involving
+negation or overlapping capabilities exposed wrong name selections during
+development. A capability prompt gives close candidates another comparison
+based on one definition at a time rather than the entire displayed list.
+It uses the same model, not a second model or an independent correctness
+oracle.
+
+The margin rule limits the cost of this second comparison. Close requests
+require four extra continuation scores: Yes and No for each of two
+functions. Each score can require multiple SDK logit calls. All function
+names are already scored before the margin check, so this approach does
+more work than one greedy name continuation.
+
+This design provides a complete-name comparison and a bounded opportunity
+to revise an ambiguous ranking. The recorded hybrid tests show its actual
+successes and failures, but there is no controlled full-score-only versus
+hybrid benchmark here proving how much accuracy the extra stage adds.
+
+The **2.0** threshold is a score-difference heuristic, not 90% confidence
+and not the subject's 90% accuracy target. It can skip a useful capability
+check, and only the top two names are reconsidered. In the stored `NEW-10`
+diagnostic, the correct reminder function ranked fifth and the first two
+names were separated by 2.2146, so the normal hybrid path did not reconsider
+the correct function. These limits are retained rather than changing the
+algorithm during documentation review.
+
+#### Relation to constrained argument decoding
+
+Function selection returns a name from the supplied definitions by scoring
+fixed names and, when needed, capability answers. After that, argument
+values and regex option codes use `generate_name_from_candidates()` with
+token-prefix constraints and logit masking. The similar helper names do
+not mean that function selection and argument generation execute the same
+algorithm. The old standalone `generate_name_by_full_scoring()` helper is
+commented out; active full scoring occurs inside the hybrid selector.
+
+### 2. Determine parameter extraction strategy
+
+After matching the selected name back to its `FunctionDefinition`, the
+pipeline recognizes a regex-specialized schema **once per selected
+function** and creates a new parameter dictionary.
+
+For every declared parameter, it either skips the special `regex` field
+(to be generated later), or selects an extraction strategy by its type:
 
 | Declared type | Candidate construction |
 |---|---|
-| `number` | Extract signed integers, decimals including `.5`, scientific notation such as `1e3`, and comma-grouped forms such as `1,000`; remove grouping commas and convert to finite floats. |
-| `string` | Keep individual fragments, quoted contents, two- and three-word phrases outside quotes, and the full request; deduplicate while preserving order. |
-| `boolean` | Offer the actual Python values `True` and `False`. |
+| `number` | Extract signed integers, decimals (including `.5`), scientific notation (`1e3`) and comma-grouped forms (`1,000`), then convert to finite floats. |
+| `string` | Collect quoted contents, individual chunks, two- and three-word segments outside recognized quotes, and chunks with trailing .!? removed. Deduplicate in first-seen order. Do not append the full request as a fallback. |
+| `boolean` | Offer the fixed candidate set `[True, False]`. |
 
-Each value is serialized with `json.dumps()` and encoded for constrained
-selection. The current representation puts a leading space before that
-serialized value.
+If a number parameter has **no numerical candidates**, a descriptive
+`ValueError` is raised rather than fabricating a value. For strings,
+both candidate coverage and the model's semantic selection remain
+possible sources of error.
 
-`message_for_parameter_extraction()` replaces the earlier
-`message_for_number_parameter()` and separate string-message path. All
-ordinary parameter types share its message assembly and JSON prefix.
-For a string parameter, the system instruction asks for the complete input
-value, preservation of spelling and formatting, and separation of the
-requested action from its argument. Number and boolean parameters use the
-general argument-extraction instruction. Boolean requests also include a
-question about the meaning of the current parameter name.
+`message_for_parameter_extraction()` constructs the LLM prompt using:
+the original request, selected function and description, parameter
+names/types, **the current parameter**, and values already extracted.
+Earlier values help provide context for subsequent parameters, but do
+not prevent the same valid value from being used more than once.
 
-The current shared builder does not require a separate few-shot string
-example. An older `message_for_string_parameter()` implementation remains
-commented out as development history; it is not part of CLI generation.
+### 3. Prepare candidates and run constrained token decoding
 
-The request, selected function, all parameter declarations, current parameter
-name, and arguments already extracted are included in the model input.
-An open JSON-object prefix supplies context for the next value, for example:
+Each candidate is serialized using `json.dumps()` and encoded into a
+token-ID sequence with the SDK's `encode()` method. The implementation
+prepends a space before the serialized candidate, matching the open JSON
+prefix of the parameter prompt. Tokenization is sensitive to whitespace
+and position: `encode(prefix) + encode(value)` is not necessarily the
+same token sequence as `encode(prefix + value)`.
+
+`generate_name_from_candidates()` uses the token sequences to constrain
+greedy selection, rather than random sampling. At every generation step:
+
+1. `find_allowed_next_token_ids()` identifies the next token IDs for
+   every candidate still matching the generated prefix.
+2. `get_logits_from_input_ids()` obtains next-token scores from the
+   model, conditioned on the prompt plus previously generated tokens.
+3. `select_next_token_id()` masks every disallowed logit to `-inf`,
+   without changing token indexes, and selects the strongest allowed ID.
+4. The generated ID extends both the full model context and the
+   candidate-matching prefix. Generation stops at a complete candidate
+   or raises an error when no continuation is possible / the limit is
+   exhausted.
+
+For illustration, imagine that two candidate values are encoded as:
 
 ```text
-{"a": 2.0, "b":
+candidate_a → [10, 20]
+candidate_b → [10, 30]
 ```
 
-The returned candidate is decoded as a Python value with `json.loads()`,
-then stored under the current parameter name.
+| Already generated | Allowed next tokens |
+|---|---|
+| `[]` | `{10}` |
+| `[10]` | `{20, 30}` |
+| `[10, 20]` | Completed `candidate_a` |
 
-The candidate list can contain the same numeric value for different
-arguments. Repeated arguments such as `a=7` and `b=7` are valid.
+The selected candidate is returned as JSON text and converted to the
+corresponding Python value with `json.loads()`. It is stored under the
+current parameter name in `parameter_dict`. The cycle repeats until all
+ordinary parameters have been visited.
 
-The n-gram step means contiguous groups of **two or three words**, not model
-tokens. For `Greet Ceren Kurt`, the pool includes `Ceren`, `Kurt`,
-`Greet Ceren`, `Ceren Kurt`, and the complete request. For
-`Echo the text Good morning everyone`, it also contains
-`Good morning everyone`. Quoted spans are preserved separately rather than
-being split into n-grams. Keeping several candidates makes the correct
-value available; the model still has to choose it correctly.
+A constrained output is **guaranteed to be selected from the supplied
+candidates when generation succeeds**, but it is not guaranteed to be
+the semantically correct choice. The `Ceren Kurt` failure demonstrates
+this distinction.
 
-The former single-parameter/single-quote shortcut was removed. In
-`Greet Ceren Kurt using the word 'hello'`, the presence of `hello` therefore
-does not remove `Ceren Kurt` from the pool. This is a bounded candidate
-strategy: arbitrary unquoted phrases of four or more words are not all
-enumerated.
+### 4. Complete regex parameters when recognized
 
-### 5. Handle recognized regex arguments
+A function activates regex-specific processing only when its definition
+contains `source_string`, `regex`, and `replacement`, **all declared as
+strings**. Detection depends on the parameter schema, not the function
+name.
 
-`progress_builder()` recognizes a regex schema when it contains
-`source_string`, `regex`, and `replacement`, all declared as `string`.
-This check is based on parameter names and types, not a hardcoded function
-name. It does not recognize every possible naming convention for regex
-functions.
+The `regex` field is skipped during the ordinary extraction loop; the
+other parameters are extracted first. After the loop:
 
-For such a schema, the ordinary parameter loop skips `regex` and first
-extracts the source text and replacement. After those values are available:
+1. `convert_regex_replacement_value()` can normalize certain unquoted
+   character names (for example, `asterisks` becomes `*`).
+2. `regex_candidate_generator()` provides seven category patterns —
+   vowels, letters, digit sequences, uppercase, lowercase, whitespace,
+   punctuation — plus eligible request-derived quoted literals.
+3. `generate_regex_pattern()` maps these to short option labels and
+   uses constrained token selection to choose the best one.
+4. The selected option is translated back to a regex pattern and stored
+   in `parameter_dict["regex"]`.
 
-1. `convert_regex_replacement_value()` handles supported unquoted character
-   names following `with`, such as `asterisks` becoming `*`. Quoted
-   `'asterisks'` remains literal text. The current names cover asterisk,
-   hyphen, and underscore, including their plural forms.
-2. `regex_candidate_generator()` builds seven category patterns: vowels,
-   letters, digit sequences, uppercase letters, lowercase letters,
-   whitespace, and punctuation. It also adds eligible quoted literals from
-   the request using `re.escape()`.
-3. `generate_regex_pattern()` presents category descriptions with short
-   option codes such as `A`, `B`, and `C`. It encodes the codes and uses the
-   same prefix constraints and logit masking to select an allowed code.
-4. The code is mapped back to its label and then to the actual regex.
+Examples include `[aeiouAEIOU]` for vowels and `[0-9]+` for digit
+sequences. This is **bounded pattern selection**, not arbitrary regex
+synthesis. The application does not call `re.sub()` as part of function
+execution; replacement examples were verified separately in tests.
 
-For example, the selected vowel category maps to `[aeiouAEIOU]`, while
-digit sequences map to `[0-9]+`. Literal `cat` maps to an escaped literal
-pattern. The final dictionary stores the pattern, not its option code.
+### 5. Validate and write the structured result
 
-This is finite-category selection with request-derived literals, not
-unrestricted regex synthesis. `re.sub()` is used in playground checks to
-verify behavior; the production application outputs the call without
-executing the requested function.
+`parameter_type_checker()` confirms that all required parameter names are
+present, no unexpected names were added, and values match their declared
+types. The numeric check accepts `int` values and finite `float` values but rejects
+`bool`, which Python otherwise considers a subclass of `int`.
 
-### 6. Validate and serialize the result
+Successful requests yield one `FunctionCallResult` each, with precisely
+`prompt`, `name`, and `parameters`. After the request loop completes,
+`model_dump()` provides Python dictionaries, and
+`json.dumps(..., allow_nan=False)` serializes the array to UTF-8 JSON.
 
-`parameter_type_checker()` checks missing and unexpected parameter names,
-then verifies the value associated with each declared name:
+Pydantic and the final parameter checker validate **structure and types**.
+They cannot prove that a chosen function or argument corresponds to the
+user's intended meaning. This is why semantic comparisons against expected
+calls are included in the test strategy.
 
-- `number` accepts `int` or finite `float` values and explicitly rejects
-  `bool`. Infinity and NaN are rejected.
-- `string` accepts `str`.
-- `boolean` accepts `bool`.
+### Historical experiments
 
-The explicit boolean exclusion matters because Python considers booleans
-instances of `int`.
-
-`FunctionCallResult.parameters` is typed as `dict[str, object]`.
-The additional checker supplies the function-specific checks that this
-broad model field cannot provide alone.
-
-Finally, `model_dump()` converts the result models to dictionaries and
-`json.dumps(..., allow_nan=False)` prepares the complete JSON text. The
-writer opens the output file only after serialization succeeds, then writes
-that text with the file's `write()` method. Serializing this text again
-would turn the root into a JSON string instead of the required array.
-
-The number extractor rejects non-finite float conversions before candidate
-encoding; the parameter checker independently checks generated values.
-Strict serialization provides a final check when the writer is called
-directly. This prevents `Infinity`, `-Infinity`, and `NaN` constants, which
-are excluded by [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259#section-6).
-The CLI reports serialization errors with status `1`.
-
-The token mask constrains candidate membership. Candidate construction,
-type checking, serialization, and semantic accuracy remain separate
-responsibilities; see the known limitations below.
-
-### Experimental JSON-string decoder
-
-`generators.py` also contains `get_json_string_state()`,
-`find_allowed_string_token_ids()`, and `generate_json_string()`.
-These experiments examine string prefixes using states including
-`not_started`, `in_string`, `backslash`, `unicode`, `completed`, and `invalid`.
-
-They were used to explore quotes, escaped characters, and Unicode escapes.
-The main CLI currently uses the finite-candidate argument path described
-above. The experimental string decoder is not a general JSON-schema engine
-integrated into that path.
+Earlier development also explored unrestricted JSON-string generation and
+quote/escape/unicode state machines (`get_json_string_state()`,
+`find_allowed_string_token_ids()`, and `generate_json_string()`). These
+experiments informed debugging but are not the current parameter-value
+production path.
 
 ## Design decisions
 
@@ -535,9 +651,10 @@ integrated into that path.
   are initialized outside the inner parameter loop.
 - **Report errors at the CLI boundary.** Lower-level loading and validation
   functions propagate errors; handled failures terminate the command.
-- **Keep an observable experimental path.** The playground contains
-  individual experiments used to understand the SDK before integrating
-  reusable logic into `src`.
+- **Retain earlier experiments separately.** `old_function_helpers.py`
+  contains the previous text/string decoding experiments. The current
+  production modules do not import it; the former repository-root
+  playground is no longer an execution entry point.
 
 ## Challenges encountered
 
@@ -631,12 +748,13 @@ The shared builder's string instruction asks for the complete current
 argument and distinguishes it from the command. In
 `Greet Ceren Kurt using the word 'hello'`, both the name and the quoted
 word remain candidates; the function description and parameter name must
-guide the model to the name. The saved 35-request fixture correctly
-extracts all nine greet examples and the six echo examples, including
-an unquoted three-word value, an empty string, and Unicode.
+guide the model to the name. A historical 35-request snapshot correctly
+extracted all nine greet examples and six echo examples, including an
+unquoted three-word value, an empty string, and Unicode.
 
-The implementation deduplicates candidates after adding words, phrases,
-quoted spans, and the full request. It does not enumerate every possible
+The current implementation deduplicates words, phrases, quoted spans,
+and punctuation-trimmed chunks. Unlike that earlier version, it does not
+append the entire request as a fallback. It does not enumerate every possible
 substring. A targeted pool check still finds no
 `First Second Third Fourth` candidate for the longer command
 `Greet First Second Third Fourth`.
@@ -841,195 +959,223 @@ a result variable that was never assigned.
 
 ## Testing strategy
 
-Testing covers separate questions:
+Testing checks input loading and Pydantic validation, function-name selection,
+number/string/boolean candidate generation, constrained token decoding, semantic
+argument accuracy, output schema, edge cases, failure reporting, and end-to-end
+CLI behavior. Ground-truth function calls were specified separately from model output.
 
-| Layer | Check |
-|---|---|
-| Loading | Files exist, JSON parses, roots are arrays, items are dictionaries. |
-| Model validation | Required function and prompt fields can be constructed. |
-| Candidate construction | Expected argument values occur in the pool. |
-| Token constraints | Allowed next IDs preserve a candidate prefix; score indexes remain token IDs. |
-| Output schema | Original prompt, valid name, required argument keys, correct value types. |
-| Meaning | Selected values match an independently specified expected call. |
-| Integration | The real CLI reads selected paths and writes one result per request. |
-| Performance | Measure the whole cached-model CLI run separately from downloads. |
+### Recorded outcomes (November 16–17, 2026)
 
-### Reproducing the additional test set
+These are recorded development runs, not fresh inference benchmarks from
+this documentation review. The saved default output was checked against
+all 11 expected calls. The local combined report was independently
+recounted: its actual-versus-expected records confirm 71/76 complete calls,
+73/76 correct names, and one error. The full 31-case report is not present
+in the current workspace; its 19/31 figure and six errors remain a
+historical reported result rather than a newly audited measurement.
 
-Run the custom-path command in the Instructions section, then compare the
-output with these representative expectations:
+| Test set | Available functions | Prompts | Fully correct | Accuracy | What this measures |
+|---|---:|---:|---:|---:|---|
+| Supplied/default 11-prompt input | Original supplied functions | 11 | 11 | **100%** | Standard CLI, original assignment input |
+| Original extended regression set | 8 | 55 | 54 | **98.2%** | Additional prompts and edge cases |
+| Independent generalization set | 7 new functions | 31 | 19 | **61.3%** | Unseen function names, overlapping capabilities, harder boolean/string cases |
+| Curated combined regression set | 15 | 76 | 71 | **93.4%** | All prior 55 plus 21 selected generalization examples |
 
-| Request | Expected selection |
-|---|---|
-| `Set room 'living room' to -5.5 degrees.` | `set_temperature` with `room="living room"`, `degrees=-5.5` |
-| `Set the temperature to 18 degrees for room 'office'.` | `set_temperature` with `room="office"`, `degrees=18` |
-| `Disable notifications for room 'kitchen'.` | `set_notifications` with `enabled=false` |
-| `Echo ''` | `echo_text` with an empty `text` string |
-| `Echo 'She said "hello"'` | `echo_text` preserving the inner double quotes |
-| `Echo 'Çağrı 🌡️'` | `echo_text` preserving the decoded Unicode value |
-| `Add 7 and 7.` | `fn_add_numbers` with both values equal to `7` |
-| `Add 123456789 and 2.` | `fn_add_numbers` with `123456789` and `2` |
-| `Greet Ceren Kurt` | `fn_greet` with `name="Ceren Kurt"` |
-| `Greet Ceren Kurt using the word 'hello'` | `fn_greet` with `name="Ceren Kurt"`, retaining the unrelated quoted word as another candidate |
-| `Echo the text Good morning everyone` | `echo_text` with `text="Good morning everyone"` |
+The 76-case run reported **73/76 correct function names** and **one execution
+error**. The original 55 cases retained **54/55** correct results after adding
+the new competing definitions. The 31-prompt independent set used a separate
+seven-function definition list; six prompts raised errors and were counted as
+failures, not omitted from its 61.3% metric.
 
-As of November 16, this fixture contains six function definitions and
-35 requests. It also includes zero, scientific notation, comma-grouped
-numbers, leading-dot decimals, negation, and quoted/unquoted full names.
-Expected values are specified independently of the generated output.
+**Important:** These are different, manually designed datasets, not directly
+comparable estimates of accuracy on unknown evaluation inputs. The combined
+set is curated and includes many cases already known to succeed. Its 93.4%
+accuracy does not supersede the independent generalization result of 61.3%.
 
-### Manual development tools
+### Failure analysis from the combined 76-case suite
+
+| Case | Observed behavior | Classification |
+|---|---|---|
+| `OLD-34` | `Greet the person by name and surname: Ceren Kurt` returned only `Ceren` | Incomplete multiword string extraction |
+| `NEW-10` | Reminder request could not obtain required `hour` for an incorrectly selected alarm function | Function selection and subsequent missing-candidate error |
+| `NEW-16`, `NEW-17` | Discount requests selected regex substitution instead | Candidate-set sensitivity / incorrect function selection |
+| `NEW-28` | `unmute it` yielded `muted: true` instead of `false` | Boolean semantic interpretation |
+
+The reminder issue was investigated with full-sequence scores. For `NEW-10`,
+`configure_alarm` ranked first at **-0.8778**, while `create_reminder` ranked
+fifth at **-10.2577**. The margin between the top two was **2.2146**, above
+the **2.0** reranking threshold. Independent capability scoring favored
+`create_reminder` (**6.2656**) over `configure_alarm` (**4.0938**), but the
+correct function was outside the top-two shortlist and capability reranking
+did not run in the normal hybrid path.
+
+In the separate 31-case generalization run, problems also appeared with
+apostrophes inside quoted strings, empty-string selection, boolean negation,
+and overlapping capabilities (`reminder` versus `alarm`).
+
+Two discount cases passed with seven available functions but selected the wrong
+function when the combined list expanded to fifteen. This demonstrates that
+adding competing definitions can change semantic function selection even when
+the output remains structurally valid.
+
+### Reproducing the mandatory/default test run
 
 ```bash
-uv run python -m sdk_playground
+uv run python -m src \
+  --functions_definition data/input/functions_definition.json \
+  --input data/input/function_calling_tests.json \
+  --output data/output/function_calling_results.json
+uv run python -m json.tool data/output/function_calling_results.json
 ```
 
-`sdk_playground.py` contains individual experiments; inspect the call at
-the bottom to select the active experiment. Some intentionally exercise error cases and raise
-exceptions. This file is not a complete automated test suite. Some older
-experiments still pass the removed second argument to `string_slicer()` or
-refer to the former fixture locations; update those calls before running
-them. The current production signature is `string_slicer(user_request)`.
+### Inspecting stored diagnostics and running local fixtures
 
-A module name passed to `python -m` has no `.py` suffix.
+The local combined report can be inspected without running the model:
 
-### Recorded results
+```bash
+uv run python -m json.tool ../combined_evaluation/combined_run_report.json
+```
 
-Fresh checks on November 16, 2026:
+It records each expected call, observed call or error, and pass flag. This
+report is a development artifact outside the repository. The accompanying
+runner requires the path and module updates described in Instructions
+before it can reproduce the report with the current project layout.
 
-| Check | Result | Scope |
-|---|---:|---|
-| Saved `extended_test_results.json` | 28/35 complete calls; 34/35 names | Earlier saved output; not the result of the latest numeric extractor. |
-| Current extended fixture, real CLI | 33/35 complete calls; 34/35 names | Six definitions, 35 requests; 89.231 seconds; exit status 0. |
-| Current original fixture, real CLI | 10/11 complete calls; 11/11 names | All three regex calls pass; `Greet shrek` incorrectly includes the command in its argument. |
-| Combined current CLI results | 43/46 complete calls (93.5%); 45/46 names | Known development fixtures, not unseen evaluation data. All 46 results pass strict JSON, original-prompt, key, and declared-type checks. |
-| Numeric helper, direct checks | 10/10 expected lists | Includes `.5`, `-.5`, `1e3`, `1,000`, `1,234,567.89`, `2E-3`, and positive/negative pairs. |
-| String-pool checks | Four expected candidates present; one limit confirmed | Full name, unrelated quoted word, unquoted three-word value, and empty string retained; an internal four-word value is absent. |
-| Mypy / flake8 | 9 errors / 5 violations | Refactoring and playground cleanup remain open. |
+The independent 31-request input can be passed to the standard CLI:
 
-Three complete-call errors remain in these two fresh CLI runs:
+```bash
+uv run python -m src \
+  --functions_definition ../test_inputs/generalization_functions.json \
+  --input ../test_inputs/generalization_prompts.json \
+  --output data/output/generalization_results.json
+```
 
-- `Do not enable notifications for room 'office'.` selects `fn_greet`
-  instead of the notification function. The test expectation interprets
-  this request as `enabled=false`; it requires no function execution.
-- `Add 0.5 and -0.5.` returns positive `0.5` for both parameters, although
-  both signed candidates are available.
-- `Greet shrek` selects the correct function but returns `"Greet shrek"`
-  instead of `"shrek"`. This is a regression from the earlier passing set.
+This exercises normal fail-fast batch behavior; it is not a command for
+reproducing a per-request report that continues after six errors. The old
+local `test_generalization.py` also refers to moved input files and a
+missing expected-results file, so it needs maintenance before reuse.
 
-Both CLI runs used the real SDK with cached model files and downloads
-disabled, and wrote to isolated temporary output paths. The supplied saved
-output was left unchanged. Direct helper checks did not run model inference.
-The extended fixture has correct results for all nine greet examples and
-all six echo examples, including full names, Unicode, apostrophes, and empty
-text. Those successes do not cover every name or quoting form.
+### Validation and negative input tests
 
-Historical checkpoints, retained to distinguish earlier versions:
+Explicit bad-input checks passed for malformed JSON, missing required fields,
+empty function lists, and duplicate function names. An unsupported parameter
+type is rejected by Pydantic. Tests also covered missing numeric argument
+candidates, Unicode, quoted/empty strings, scientific notation, negative
+numbers, thousands separators, multiple parameters, regex substitution, and
+boolean instructions with negation.
 
-| Check | Result | Scope |
-|---|---:|---|
-| November 12 additional test set | 11/11 complete calls | Earlier four-definition fixture. |
-| November 12 original test set | 9/11 complete calls | All 11 names correct; two regex argument extractions incorrect. |
-| November 15 original and additional sets | 22/22 complete calls | Two 11-request fixtures; cached-model CLI times 37.456 and 35.147 seconds. |
-| Chat-format selection diagnostic | 20/20 function names | Name selection only, across two request sets. |
-| CLI success/error scenarios | 12/12 expected outcomes | Earlier integration checks, including controlled model/generation failures. |
-| Number-value validation | 8/8 expected outcomes | Finite values, large integers, infinity, NaN, and boolean rejection in a number field. |
-| Strict result writing | 6/6 expected outcomes | Array round trip, non-finite rejection, preserved existing files, and no new file for invalid data. |
-| CLI output-error handling | 2/2 expected outcomes | Real writer and CLI handlers; controlled generation supplied invalid data or an unavailable destination. |
-| Boolean polarity comparison | 3/4 correct values | Both `enabled` cases pass; `disabled` with `Enable notifications` remains incorrect. |
+For example, deliberately pass an invalid JSON file:
 
-The CLI scenario checks include custom paths, malformed and missing input,
-invalid list members, missing fields, output path failures, and controlled
-initialization/generation errors.
+```bash
+printf '[{"name":"broken",}]\n' > /tmp/cmm_bad.json
+uv run python -m src --functions_definition /tmp/cmm_bad.json
+```
 
-The two output-error checks stubbed model construction and generation to
-reach the output boundary directly. Loading, serialization, file handling,
-and CLI exception handling remained real. The separate 11-request run used
-the real SDK model throughout.
+This should report a JSON parse error and exit nonzero without starting the model.
 
-These measurements describe specific test sets. Unseen functions and
-requests still require independent evaluation against the subject's
-90%+ accuracy target.
+### Historical development checkpoints
+
+Earlier implementation-stage results and tokenizer/debugging experiments are
+preserved in [Challenges encountered](#challenges-encountered). They are historical
+snapshots rather than the latest end-to-end benchmark.
 
 ## Performance analysis
 
-The November 16 full CLI run of the expanded **35-request** fixture took
-**89.231 seconds**, including startup and model loading. It returned
-33 completely correct calls, 34 correct function names, and 35
-schema-compliant results. Speed and semantic accuracy are separate checks.
+Previously recorded cached-model timings on the development machine:
 
-Measurement conditions:
+The figures below are retained from the author's run record. Raw timing
+logs are not bundled in this checkout, and this documentation review did
+not run model inference again to remeasure them.
 
-- macOS, Python 3.14.4.
-- The SDK's default model and automatic device selection.
-- Model files already cached; model downloads disabled.
-- The project virtual-environment interpreter ran `python -m src`.
-- Time included application startup, model initialization, generation,
-  validation, and output writing.
-- The process exited with status `0` and wrote 35 results to an isolated
-  temporary path, then each call was compared with an explicit expectation.
+| Workload | End-to-end runtime | Result |
+|---|---:|---|
+| Default 11-prompt CLI | **46.617 s** | 11/11 fully correct |
+| Original 55-prompt CLI | **4 min 13.26 s** | 54/55 fully correct |
 
-This measured run is below the subject's five-minute limit for that
-machine and workload. First-time downloads, different hardware, longer
-requests, and larger function sets can change the elapsed time.
+The default and 55-prompt measurements were obtained using the real
+`Small_LLM_Model` SDK and the regular batch CLI. The combined 76-prompt
+regression set was run using a shared-model per-prompt diagnostic runner;
+a comparable total runtime for that run was not recorded. Per-prompt
+subprocess tests (which reload the model repeatedly) are not a valid
+measurement of a single-batch run.
 
-The implementation avoids repeatedly constructing the model and prepares
-the function-name encodings once per run. Each token step still requests
-logits for the complete current context through the SDK, scans candidate
-prefixes, and masks the vocabulary scores. Long contexts and continuations
-therefore remain relevant performance factors.
+The subject requests 90%+ accuracy, 100% JSON/schema compliance for outputs,
+and processing of all evaluation prompts in under five minutes on standard
+hardware. The 55-prompt run met the five-minute target on the development
+machine, but this does not guarantee the same runtime with different models,
+function counts, prompts, or evaluator hardware.
+
+For another local timing measurement:
+
+```bash
+time uv run python -m src \
+  --functions_definition data/input/functions_definition.json \
+  --input data/input/function_calling_tests.json \
+  --output data/output/function_calling_results.json
+```
+
+The model is initialized once per batch. Repeated SDK logit calculations,
+context length, candidate pool size, and token limits affect runtime.
+There is a clear trade-off between fuller comparison of alternative
+functions and inference time.
 
 ## Current limitations and remaining work
 
-1. **Candidate coverage is bounded.** Ordinary arguments are selected from
-   the constructed pool. Two- and three-word n-grams improve unquoted
-   multiword extraction, but a four-word argument inside a longer unquoted
-   command may still be absent. Quoted spans and the entire original
-   request are retained separately. Prompt instructions cannot recover an
-   absent candidate.
-2. **Regex support has a finite scope.** The specialized branch requires
-   the three canonical string parameter names. Its seven categories and
-   request-derived literals do not cover arbitrary regexes. Whole-source
-   literals are excluded by the current literal filter. Replacement-name
-   conversion only covers the registered asterisk/hyphen/underscore names
-   following English `with`; other names and phrasings need validation.
-3. **Boolean meaning is not fully reliable.** An earlier observed failure returns
-   `disabled=true` for `Enable notifications`, where `false` is required.
-   Offering only correctly typed boolean candidates does not resolve the
-   meaning of an inverted parameter name. That historical polarity test
-   still needs a run against the latest shared prompt. Negated requests
-   also need correct function selection before their argument values can
-   be assessed.
-4. **Numeric extraction and numeric selection are distinct.** The current
-   extractor supports `.5`, `1e3`, and `1,000`; older saved results predate
-   that support. A correct candidate such as `-0.5` can still lose to `0.5`
-   during model selection. Written-out numbers are not converted, and
-   conversion to `float` limits precision and range. Malformed separators,
-   locale-dependent number formats, and numbers embedded in unrelated
-   text need explicit policy and wider tests.
-5. **The natural-language quote splitters are limited.** Unquoted multiword
-   arguments and escaped quote delimiters need wider coverage.
-6. **Generation has fixed token budgets.** The current pipeline allows
-   10 tokens for a function name and 50 for a value candidate. Long valid
-   names or values can exhaust those budgets and raise a `ValueError`.
-7. **Quality checks need refreshing after refactoring.** On November 16,
-   mypy reports nine errors and flake8 reports five violations. These
-   include a reused local variable with incompatible types in the shared
-   builder, outdated playground calls, nested-model type annotations, and
-   long lines. They are tracked in `to-do-list.txt`.
-8. **Broader evaluation remains open.**
-   The manual experiments and current passing cases are useful evidence, but
-   do not establish correctness for all evaluation inputs.
+1. **Function selection is sensitive to the candidate set.** Full-sequence
+   scoring followed by top-two capability reranking can miss a correct
+   function ranked outside the shortlist. The reminder/alarm example in
+   `NEW-10` demonstrates this. Adding competing functions can also change
+   results: `NEW-16` and `NEW-17` passed with seven functions but chose
+   regex substitution in the fifteen-function run.
+2. **Total log-probability is length-sensitive.** Scores are summed across
+   name tokens, which may favor shorter candidate token sequences. This
+   may contribute to some rankings, but the specific failures above were
+   not proved to be caused by name length.
+3. **String candidate coverage and selection are imperfect.** The pool
+   supports quoted spans, individual chunks, two- and three-word n-grams,
+   and punctuation-trimmed chunks. It does not append the full request
+   as a fallback. The correct value can still lose to an incomplete
+   candidate (`OLD-34`: `Ceren` instead of `Ceren Kurt`). Ambiguous
+   apostrophes, escaped delimiters, and some empty-string instructions
+   also remain challenging.
+4. **Boolean polarity is not always inferred correctly.** Negated or
+   inverse-state commands (`unmute` with `muted`) may yield an incorrect
+   boolean even though both `True` and `False` are valid candidates.
+5. **Numeric extraction and selection are separate.** Signed, decimal,
+   scientific, and comma-grouped numeric forms are supported, but
+   written-out numbers and locale-specific representations are not
+   generally converted. Missing numerical candidates raise `ValueError`
+   instead of inventing a number.
+6. **Regex support is deliberately bounded.** Only a recognized schema
+   containing string `source_string`, `regex`, and `replacement` activates
+   post-processing. Supported patterns come from a small category catalog
+   plus certain quoted literals; arbitrary regex synthesis is not provided.
+7. **Valid structure does not imply correct meaning.** Pydantic and the
+   result checker verify names/types relative to the selected definition,
+   but a structurally valid call can select the wrong function or value.
+8. **Batch CLI behavior is fail-fast.** A missing required argument can
+   stop the normal batch. The optional test runner catches errors per
+   request solely to measure the remainder of a regression set.
+9. **Final submission verification remains necessary.** The November 17
+   review confirmed clean flake8 and the mandatory mypy flags, complete
+   module/function/class docstrings, and the required Makefile targets.
+   A fresh-clone run still needs its final check. At review time,
+   `data/output/function_calling_results.json` was still tracked despite
+   the ignore rule; remove generated output from Git's tracked submission.
+10. **Optional artifacts are not fully portable yet.** The FigJam PDF/PNG
+   exports are absent, while diagnostic fixtures live above the repository
+   and their old runners require path/import updates. Default CLI usage
+   does not depend on these optional artifacts.
 
-These are remaining engineering tasks. The README distinguishes implemented
-behavior, measured successes, and unresolved limits.
+These limitations are documented from observed tests; the reported percentages
+are not guarantees for unknown evaluation prompts.
 
 ## Resources and AI usage
 
 ### References
 
-- [Project subject](call_me_maybe_v1_5.pdf): mandatory behavior, output format,
-  evaluation targets, and README requirements.
+- [Project subject v1.5](call_me_maybe_v1_5.pdf): mandatory behavior, output
+  format, evaluation targets, and README requirements.
 - [Supplied SDK source](llm_sdk/llm_sdk/__init__.py): public methods and model
   initialization.
 - [Python JSON documentation](https://docs.python.org/3/library/json.html):
@@ -1053,8 +1199,22 @@ behavior, measured successes, and unresolved limits.
 
 ### How AI was used
 
-ChatGPT/Codex was used as a learning and review partner throughout the project
-to explain Python data structures, Pydantic models, tokenizer behavior,
-logits, masking, and JSON-string states. It also helped break down algorithms,
-review implementation attempts, design test cases, investigate failures,
-and run targeted verification experiments.
+ChatGPT/Codex was used as a **learning, debugging, and documentation partner**
+in these areas:
+
+- **Concepts and SDK exploration:** Python collections, Pydantic models,
+  logit masking, tokenization boundaries, JSON encoding/decoding, and the
+  supplied SDK's public methods.
+- **Algorithm design and review:** Discussing finite candidate pools,
+  full-sequence log-probability scoring, capability-based reranking,
+  sequential argument extraction, and the regex special case.
+- **Tests and debugging:** Designing normal and edge-case prompts,
+  generating independent expected results, analyzing wrong function
+  choices and argument values, reviewing error handling and lint issues.
+- **Documentation:** Reviewing README completeness against the project
+  subject, planning the FigJam architecture diagram, and preparing
+  evaluation-friendly descriptions of trade-offs and known limitations.
+
+AI suggestions and generated test material were treated as proposals to
+inspect and verify, not as evidence of correctness. The author remains
+responsible for understanding, reviewing, and maintaining the submitted code.
