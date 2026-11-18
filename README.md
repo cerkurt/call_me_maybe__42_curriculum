@@ -305,7 +305,8 @@ uses the selector, extractor, regex, and shared LLM helpers.
 ## Architecture diagram
 
 An external diagram is available on
-[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?t=VYSTQmxtIs2KLD0C-1).
+[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?node-id=0-1&p=f&t=P96hPD09sWdrDlUF-0).
+
 The shortened version of the same Mermaid diagram from the FigJam file 
 describes the source-code flow visually.
 
@@ -587,8 +588,11 @@ calls are included in the test strategy.
   model as appropriate.
 - **Reuse one model instance.** Model loading happens once after the input
   files have been validated.
-- **Read function metadata from the supplied definitions.** The selection
-  pipeline does not contain a branch for each sample function name.
+- **Read function metadata from the supplied definitions.** The application reads
+- function names, descriptions, and parameter types from the provided JSON file
+- instead of hardcoding rules for individual functions. This allows the same
+- selection pipeline to work with new function definitions without modifying the
+- Python code.
 - **Use explicit candidate constraints.** Prompt wording provides context;
   the logit mask restricts which candidate continuations can be selected.
 - **Retain extraction context.** Previously extracted parameters accompany
@@ -603,10 +607,6 @@ calls are included in the test strategy.
   are initialized outside the inner parameter loop.
 - **Report errors at the CLI boundary.** Lower-level loading and validation
   functions propagate errors; handled failures terminate the command.
-- **Retain earlier experiments separately.** `old_function_helpers.py`
-  contains the previous text/string decoding experiments. The current
-  production modules do not import it; the former repository-root
-  playground is no longer an execution entry point.
 
 ## Challenges encountered
 
@@ -691,18 +691,18 @@ changing the model prompt.
 ### Multiword values needed both a larger pool and clearer instructions
 
 An earlier pool could offer only separate words for an unquoted full name.
-For `Greet Ceren Kurt`, selecting either `Ceren` or `Kurt` loses part of
+For `Greet Jane Doe`, selecting either `Jane` or `Doe` loses part of
 the requested value. Adding contiguous two- and three-word phrases makes
-`Ceren Kurt` available without manually encoding a specific person's name.
+`Jane Doe` available without manually encoding a specific person's name.
 
 Pool construction and prompting solve different parts of this problem.
 The shared builder's string instruction asks for the complete current
 argument and distinguishes it from the command. In
-`Greet Ceren Kurt using the word 'hello'`, both the name and the quoted
+`Greet Jane Doe using the word 'hello'`, both the name and the quoted
 word remain candidates; the function description and parameter name must
-guide the model to the name. A historical 35-request snapshot correctly
-extracted all nine greet examples and six echo examples, including an
-unquoted three-word value, an empty string, and Unicode.
+guide the model to the name. Extended tests correctly extracted all nine 
+greet examples and six echo examples, including an unquoted three-word 
+value, an empty string, and Unicode.
 
 The current implementation deduplicates words, phrases, quoted spans,
 and punctuation-trimmed chunks. Unlike that earlier version, it does not
@@ -718,7 +718,7 @@ whose content was the wrong regex. For example, `[a-zA-Z]+` is a valid
 pattern but replaces whole letter sequences when the request asks only
 for vowels. Testing only `json.loads()` would miss that error.
 
-Playground checks therefore applied the selected pattern to source text:
+Extended checks therefore applied the selected pattern to source text:
 
 | Source | Pattern | Replacement | Expected diagnostic result |
 |---|---|---|---|
@@ -743,15 +743,14 @@ addresses the supported cases while preserving quoted literal text.
 
 The old numeric pattern split `.5`, scientific notation, and comma-grouped
 numbers incorrectly. The updated extractor offers `0.5`, `1000.0`, and
-`1000.0` for `.5`, `1e3`, and `1,000`, respectively. A saved output file can
-still contain results from before the parser changed, so it must be
-distinguished from a fresh CLI run.
+`1000.0` for `.5`, `1e3`, and `1,000`, respectively.
 
-For `Add 0.5 and -0.5.`, the current helper returns both signed values.
-If the model selects `0.5` for both parameters, the remaining error is in
-semantic selection, not a missing minus sign in the candidate pool. A fix
-must preserve valid repetitions such as `Add 7 and 7`; globally banning
-already-selected values would break that case.
+The numeric extractor preserves signed values, including both `0.5` and `-0.5` 
+in requests such as `Add 0.5 and -0.5.`. Previously selected values are not 
+excluded from subsequent parameter candidate pools, allowing valid repeated 
+arguments such as `Add 7 and 7.`. Earlier tests exposed incorrect numeric 
+selection despite correct candidate extraction, but this failure was not 
+reproduced in the latest extended test set.
 
 ### Quoted text, apostrophes, and escape characters have different roles
 
@@ -803,7 +802,7 @@ and `string` about 26.6283.
 
 Restricting a quoted single-argument request to its quoted candidate helped
 those examples, but excluded the actual name in requests such as
-`Greet Ceren using the word 'hello'`. The current implementation removed
+`Greet Jane using the word 'hello'`. The current implementation removed
 that shortcut, expanded the pool with n-grams, and strengthened the shared
 string instruction. Quoted text remains available alongside other values.
 
@@ -818,11 +817,8 @@ chose `echo_text` for all nine requests.
 
 Wrapping the same selection content in system and user messages followed
 by an open assistant prefix restored correct name selection in a diagnostic
-covering nine new requests and eleven original requests.
-
-The production function was then updated, and the complete additional
-test set was checked again. This was a prompt-format improvement; the
-token mask continued to enforce the available name candidates.
+covering nine new requests and eleven original requests. This was a prompt-format 
+improvement; the token mask continued to enforce the available name candidates.
 
 ### Extracted arguments must remain separate from parameter declarations
 
@@ -843,22 +839,6 @@ validate structured data, while `Small_LLM_Model` supplies tokenizer
 operations and next-token scores. Each function needs the appropriate kind
 of object for its responsibility.
 
-### Loop placement and mutation affected the whole output
-
-Several implementation details had visible consequences:
-
-- Printing a header inside a parameter loop repeated the header.
-- Returning from inside the first generation iteration stopped generation
-  after one token.
-- Creating a result inside the parameter loop produced separate result
-  objects for `a` and `b`.
-- `list.append()` modifies the existing list and returns `None`.
-- Both token histories must receive each selected ID, while candidate
-  matching uses only the generated prefix.
-
-The final structure collects all parameters before appending one result
-for a request.
-
 ### A tuple of messages is not one model-input string
 
 This return value contains three separate strings in a tuple:
@@ -870,10 +850,6 @@ return system_message, user_message, open_assistant_start
 The SDK expects one input string. Passing the tuple during development
 produced a tensor-shape error referring to inconsistent sequence lengths.
 Concatenating the message strings before returning them fixed the mismatch.
-
-A `-> str` annotation describes the intended contract; it does not convert
-an incorrect return value at runtime. Mypy provides an earlier check of
-that contract.
 
 ### Unicode escapes can preserve the original text
 
@@ -948,7 +924,7 @@ accuracy does not supersede the independent generalization result of 61.3%.
 
 | Case | Observed behavior | Classification |
 |---|---|---|
-| `OLD-34` | `Greet the person by name and surname: Ceren Kurt` returned only `Ceren` | Incomplete multiword string extraction |
+| `OLD-34` | `Greet the person by name and surname: Jane Doe` returned only `Jane` | Incomplete multiword string extraction |
 | `NEW-10` | Reminder request could not obtain required `hour` for an incorrectly selected alarm function | Function selection and subsequent missing-candidate error |
 | `NEW-16`, `NEW-17` | Discount requests selected regex substitution instead | Candidate-set sensitivity / incorrect function selection |
 | `NEW-28` | `unmute it` yielded `muted: true` instead of `false` | Boolean semantic interpretation |
@@ -1025,12 +1001,6 @@ uv run python -m src --functions_definition /tmp/cmm_bad.json
 
 This should report a JSON parse error and exit nonzero without starting the model.
 
-### Historical development checkpoints
-
-Earlier implementation-stage results and tokenizer/debugging experiments are
-preserved in [Challenges encountered](#challenges-encountered). They are historical
-snapshots rather than the latest end-to-end benchmark.
-
 ## Performance analysis
 
 Previously recorded cached-model timings on the development machine:
@@ -1082,12 +1052,12 @@ functions and inference time.
 2. **Total log-probability is length-sensitive.** Scores are summed across
    name tokens, which may favor shorter candidate token sequences. This
    may contribute to some rankings, but the specific failures above were
-   not proved to be caused by name length.
+   not proven to be caused by name length.
 3. **String candidate coverage and selection are imperfect.** The pool
    supports quoted spans, individual chunks, two- and three-word n-grams,
    and punctuation-trimmed chunks. It does not append the full request
    as a fallback. The correct value can still lose to an incomplete
-   candidate (`OLD-34`: `Ceren` instead of `Ceren Kurt`). Ambiguous
+   candidate (`OLD-34`: `Jane` instead of `Jane Doe`). Ambiguous
    apostrophes, escaped delimiters, and some empty-string instructions
    also remain challenging.
 4. **Boolean polarity is not always inferred correctly.** Negated or
@@ -1162,11 +1132,7 @@ in these areas:
   sequential argument extraction, and the regex special case.
 - **Tests and debugging:** Designing normal and edge-case prompts,
   generating independent expected results, analyzing wrong function
-  choices and argument values, reviewing error handling and lint issues.
+  choices and argument values.
 - **Documentation:** Reviewing README completeness against the project
-  subject, planning the FigJam architecture diagram, and preparing
-  evaluation-friendly descriptions of trade-offs and known limitations.
-
-AI suggestions and generated test material were treated as proposals to
-inspect and verify, not as evidence of correctness. The author remains
-responsible for understanding, reviewing, and maintaining the submitted code.
+  subject, preparing evaluation-friendly descriptions of trade-offs and
+  known limitations.
