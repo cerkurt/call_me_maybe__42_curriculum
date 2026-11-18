@@ -45,7 +45,7 @@ function or calculate its return value.
 
 Function definitions are supplied through JSON files. Their names,
 descriptions, parameter names, and declared types drive the selection and
-validation process. The current supported parameter and return type
+validation process. The currently supported parameter and return type
 declarations are `number`, `string`, and `boolean`.
 
 The supplied `Small_LLM_Model` SDK loads `Qwen/Qwen3-0.6B` by default.
@@ -288,7 +288,7 @@ The repository separates application responsibilities into these modules:
 │   └──regex_helpers.py         # Pattern options and replacement conversion
 ├── data/
 │   ├── input/                  # Default demonstration definitions/prompts
-│   └── output/                 # Generated locally; exclude from submission
+│   └── output/                 # Generated locally; excluded from submission
 ├── llm_sdk/                    # Supplied uv workspace dependency
 ├── pyproject.toml
 ├── uv.lock
