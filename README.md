@@ -18,7 +18,6 @@ and token-level constrained argument extraction.
 - [Challenges encountered](#challenges-encountered)
 - [Testing strategy](#testing-strategy)
 - [Performance analysis](#performance-analysis)
-- [Current limitations and remaining work](#current-limitations-and-remaining-work)
 - [Resources and AI usage](#resources-and-ai-usage)
 
 ## Description
@@ -939,212 +938,296 @@ Result serialization is completed before output directories are created or
 files are opened, preventing serialization failures from modifying existing 
 output files.
 
-## Testing strategy
+## Testing Strategy
 
-Testing checks input loading and Pydantic validation, function-name selection,
-number/string/boolean candidate generation, constrained token decoding, semantic
-argument accuracy, output schema, edge cases, failure reporting, and end-to-end
-CLI behavior. Ground-truth function calls were specified separately from model output.
+The application was tested using the original project inputs, additional valid 
+requests, and deliberately invalid inputs. The goal was to verify not only that 
+the application produces valid JSON, but also that it selects the intended 
+function and extracts the correct argument values.
 
-### Recorded outcomes (November 16–17, 2026)
+A separate `test_suite/` directory contains supplementary test fixtures, expected 
+outputs, a result comparison script, and an error-case runner. These tests 
+extend the mandatory examples without modifying the supplied input files.
 
-These are recorded development runs, not fresh inference benchmarks from
-this documentation review. The saved default output was checked against
-all 11 expected calls. The local combined report was independently
-recounted: its actual-versus-expected records confirm 71/76 complete calls,
-73/76 correct names, and one error. The full 31-case report is not present
-in the current workspace; its 19/31 figure and six errors remain a
-historically reported result rather than a newly audited measurement.
+### Test coverage
 
-| Test set | Available functions | Prompts | Fully correct | Accuracy | What this measures |
-|---|---:|---:|---:|---:|---|
-| Supplied/default 11-prompt input | Original supplied functions | 11 | 11 | **100%** | Standard CLI, original assignment input |
-| Original extended regression set | 8 | 55 | 54 | **98.2%** | Additional prompts and edge cases |
-| Independent generalization set | 7 new functions | 31 | 19 | **61.3%** | Unseen function names, overlapping capabilities, harder boolean/string cases |
-| Curated combined regression set | 15 | 76 | 71 | **93.4%** | All prior 55 plus 21 selected generalization examples |
+Four groups of tests were executed:
 
-The 76-case run reported **73/76 correct function names** and **one execution
-error**. The original 55 cases retained **54/55** correct results after adding
-the new competing definitions. The 31-prompt independent set used a separate
-seven-function definition list; six prompts raised errors and were counted as
-failures, not omitted from its 61.3% metric.
-
-**Important:** These are different, manually designed datasets, not directly
-comparable estimates of accuracy on unknown evaluation inputs. The combined
-set is curated and includes many cases already known to succeed. Its 93.4%
-accuracy does not supersede the independent generalization result of 61.3%.
-
-### Failure analysis from the combined 76-case suite
-
-| Case | Observed behavior | Classification |
+| Test group | Scope | Result |
 |---|---|---|
-| `OLD-34` | `Greet the person by name and surname: Jane Doe` returned only `Jane` | Incomplete multiword string extraction |
-| `NEW-10` | Reminder request could not obtain required `hour` for an incorrectly selected alarm function | Function selection and subsequent missing-candidate error |
-| `NEW-16`, `NEW-17` | Discount requests selected regex substitution instead | Candidate-set sensitivity / incorrect function selection |
-| `NEW-28` | `unmute it` yielded `muted: true` instead of `false` | Boolean semantic interpretation |
+| Mandatory inputs | 11 prompts, 5 function definitions | 11/11 correct |
+| Error handling | 9 invalid-input/error scenarios | 9/9 handled |
+| Extended 21 | 21 prompts | 21/21 correct |
+| Extended 42 | 42 prompts, 8 function definitions | 40/42 correct |
 
-The reminder issue was investigated with full-sequence scores. For `NEW-10`,
-`configure_alarm` ranked first at **-0.8778**, while `create_reminder` ranked
-fifth at **-10.2577**. The margin between the top two was **2.2146**, above
-the **2.0** reranking threshold. Independent capability scoring favored
-`create_reminder` (**6.2656**) over `configure_alarm` (**4.0938**), but the
-correct function was outside the top-two shortlist and capability reranking
-did not run in the normal hybrid path.
+The extended tests cover function selection, numeric arguments, quoted and unquoted 
+strings, multiword values, Unicode, empty strings, boolean interpretation, and 
+regex pattern selection.
 
-In the separate 31-case generalization run, problems also appeared with
-apostrophes inside quoted strings, empty-string selection, boolean negation,
-and overlapping capabilities (`reminder` versus `alarm`).
+The error-case tests exercise invalid or unsupported inputs, including malformed 
+JSON, invalid function definitions, missing required fields, and requests for 
+numerical arguments without extractable numbers.
 
-Two discount cases passed with seven available functions but selected the wrong
-function when the combined list expanded to fifteen. This demonstrates that
-adding competing definitions can change semantic function selection even when
-the output remains structurally valid.
+### Validation methodology
 
-### Reproducing the mandatory/default test run
+The test process distinguishes three levels of correctness:
 
-```bash
-uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
-  --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
-uv run python -m json.tool data/output/function_calling_results.json
+1. **Structural validity:** The output has the required JSON structure, 
+parameter names, and declared value types.
+2. **Function selection:** The selected function name matches the expected
+ function.
+3. **Semantic argument accuracy:** The extracted parameter values match the 
+expected values, not merely their types.
+
+For the extended suites, the generated results are compared against manually 
+prepared expected JSON objects using `compare_results.py`. A result is counted 
+as correct only when the function name and all parameter values match the expected 
+call. The comparison also reports missing and extra results.
+
+The error-case runner, `run_error_cases.py`, exercises invalid inputs and checks 
+the application's error-handling behavior separately from semantic function-calling 
+accuracy.
+
+### Extended test results
+
+The 21-prompt suite produced 21 correct results, with no missing or extra entries, 
+achieving **100.0% exact-call accuracy**.
+
+The larger 42-prompt suite produced 40 correct results, with no missing or extra 
+entries, achieving **95.2% exact-call accuracy**.
+
+Importantly, all 42 prompts in the larger suite selected the expected function 
+name. Both unsuccessful cases involved argument extraction rather than function 
+selection.
+
+| Metric | 21-prompt suite | 42-prompt suite |
+|---|---:|---:|
+| Correct complete calls | 21/21 | 40/42 |
+| Correct function names | 21/21 | 42/42 |
+| Missing results | 0 | 0 |
+| Extra results | 0 | 0 |
+| Exact-call accuracy | 100.0% | 95.2% |
+
+### Known failures and limitations
+
+Two cases in the 42-prompt suite did not match their expected outputs. Both are 
+retained as documented failures rather than removed or modified to improve the 
+reported accuracy.
+
+**Case 30 — Empty-string extraction**
+
+Request:
+
+```text
+Reverse '' please.
 ```
 
-### Inspecting stored diagnostics and running local fixtures
+Expected parameter:
 
-The local combined report can be inspected without running the model:
-
-```bash
-uv run python -m json.tool ../combined_evaluation/combined_run_report.json
+```json
+{"s": ""}
 ```
 
-It records each expected call, observed call or error, and pass flag. This
-report is a development artifact outside the repository. The accompanying
-runner requires the path and module updates described in Instructions
-before it can reproduce the report with the current project layout.
+Actual parameter:
 
-The independent 31-request input can be passed to the standard CLI:
-
-```bash
-uv run python -m src \
-  --functions_definition ../test_inputs/generalization_functions.json \
-  --input ../test_inputs/generalization_prompts.json \
-  --output data/output/generalization_results.json
+```json
+{"s": "Reverse"}
 ```
 
-This exercises normal fail-fast batch behavior; it is not a command for
-reproducing a per-request report that continues after six errors. The old
-local `test_generalization.py` also refers to moved input files and a
-missing expected-results file, so it needs maintenance before reuse.
+The correct function, `fn_reverse_string`, was selected, but the extracted 
+argument was incorrect. The implementation selected a word from the surrounding 
+instruction instead of the intended empty string.
 
-### Validation and negative input tests
+This demonstrates that string candidate availability and constrained decoding 
+do not guarantee semantic correctness, particularly when the requested value is empty.
 
-Explicit bad-input checks passed for malformed JSON, missing required fields,
-empty function lists, and duplicate function names. An unsupported parameter
-type is rejected by Pydantic. Tests also covered missing numeric argument
-candidates, Unicode, quoted/empty strings, scientific notation, negative
-numbers, thousands separators, multiple parameters, regex substitution, and
-boolean instructions with negation.
+**Case 41 — Incorrect literal regex selection**
 
-For example, deliberately pass an invalid JSON file:
+Request:
 
-```bash
-printf '[{"name":"broken",}]\n' > /tmp/cmm_bad.json
-uv run python -m src --functions_definition /tmp/cmm_bad.json
+```text
+Substitute 'cat' with 'dog' in 'The cat sat on the mat with another cat'.
 ```
 
-This should report a JSON parse error and exit nonzero without starting the model.
+Expected parameters:
 
-## Performance analysis
-
-Previously recorded cached-model timings on the development machine:
-
-The figures below are retained from the author's run record. Raw timing
-logs are not bundled in this checkout, and this documentation review did
-not run model inference again to remeasure them.
-
-| Workload | End-to-end runtime | Result |
-|---|---:|---|
-| Default 11-prompt CLI | **46.617 s** | 11/11 fully correct |
-| Original 55-prompt CLI | **4 min 13.26 s** | 54/55 fully correct |
-
-The default and 55-prompt measurements were obtained using the real
-`Small_LLM_Model` SDK and the regular batch CLI. The combined 76-prompt
-regression set was run using a shared-model per-prompt diagnostic runner;
-a comparable total runtime for that run was not recorded. Per-prompt
-subprocess tests (which reload the model repeatedly) are not a valid
-measurement of a single-batch run.
-
-The subject requests 90%+ accuracy, 100% JSON/schema compliance for outputs,
-and processing of all evaluation prompts in under five minutes on standard
-hardware. The 55-prompt run met the five-minute target on the development
-machine, but this does not guarantee the same runtime with different models,
-function counts, prompts, or evaluator hardware.
-
-For another local timing measurement:
-
-```bash
-time uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
-  --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
+```json
+{
+    "source_string": "The cat sat on the mat with another cat",
+    "regex": "cat",
+    "replacement": "dog"
+}
 ```
 
-The model is initialized once per batch. Repeated SDK logit calculations,
-context length, candidate pool size, and token limits affect runtime.
-There is a clear trade-off between fuller comparison of alternative
-functions and inference time.
+Actual parameters:
 
-## Current limitations and remaining work
+```json
+{
+    "source_string": "The cat sat on the mat with another cat",
+    "regex": "[a-zA-Z]+",
+    "replacement": "dog"
+}
+```
 
-1. **Function selection is sensitive to the candidate set.** Full-sequence
-   scoring followed by top-two capability reranking can miss a correct
-   function ranked outside the shortlist. The reminder/alarm example in
-   `NEW-10` demonstrates this. Adding competing functions can also change
-   results: `NEW-16` and `NEW-17` passed with seven functions but chose
-   regex substitution in the fifteen-function run.
-2. **Total log-probability is length-sensitive.** Scores are summed across
-   name tokens, which may favor shorter candidate token sequences. This
-   may contribute to some rankings, but the specific failures above were
-   not proven to be caused by name length.
-3. **String candidate coverage and selection are imperfect.** The pool
-   supports quoted spans, individual chunks, two- and three-word n-grams,
-   and punctuation-trimmed chunks. It does not append the full request
-   as a fallback. The correct value can still lose to an incomplete
-   candidate (`OLD-34`: `Jane` instead of `Jane Doe`). Ambiguous
-   apostrophes, escaped delimiters, and some empty-string instructions
-   also remain challenging.
-4. **Boolean polarity is not always inferred correctly.** Negated or
-   inverse-state commands (`unmute` with `muted`) may yield an incorrect
-   boolean even though both `True` and `False` are valid candidates.
-5. **Numeric extraction and selection are separate.** Signed, decimal,
-   scientific, and comma-grouped numeric forms are supported, but
-   written-out numbers and locale-specific representations are not
-   generally converted. Missing numerical candidates raise `ValueError`
-   instead of inventing a number.
-6. **Regex support is deliberately bounded.** Only a recognized schema
-   containing string `source_string`, `regex`, and `replacement` activates
-   post-processing. Supported patterns come from a small category catalog
-   plus certain quoted literals; arbitrary regex synthesis is not provided.
-7. **Valid structure does not imply correct meaning.** Pydantic and the
-   result checker verify names/types relative to the selected definition,
-   but a structurally valid call can select the wrong function or value.
-8. **Batch CLI behavior is fail-fast.** A missing required argument can
-   stop the normal batch. The optional test runner catches errors per
-   request solely to measure the remainder of a regression set.
-9. **Final submission verification remains necessary.** The November 17
-   review confirmed clean flake8 and the mandatory mypy flags, complete
-   module/function/class docstrings, and the required Makefile targets.
-   A fresh-clone run still needs its final check. At review time,
-   `data/output/function_calling_results.json` was still tracked despite
-   the ignore rule; remove generated output from Git's tracked submission.
-10. **Optional artifacts are not fully portable yet.** The FigJam PDF/PNG
-   exports are absent, while diagnostic fixtures live above the repository
-   and their old runners require path/import updates. Default CLI usage
-   does not depend on these optional artifacts.
+The function name, source string, and replacement were correct. However, the 
+regex selector chose a general letter-sequence pattern rather than the requested 
+literal `cat`.
 
-These limitations are documented from observed tests; the reported percentages
-are not guarantees for unknown evaluation prompts.
+Both patterns are syntactically valid, but their substitution behavior differs 
+significantly. The expected pattern matches occurrences of `cat`, while `[a-zA-Z]+` 
+matches all consecutive letter sequences.
+
+A related mandatory request was handled correctly:
+
+```text
+Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'
+```
+
+The mandatory and extended requests differ in wording and punctuation. In particular, 
+the mandatory request explicitly identifies `cat` as *the word* to replace.
+
+This suggests a potential sensitivity to natural-language phrasing. However, the 
+available results do not establish whether the difference was caused by wording, 
+inference behavior, or another execution condition.
+
+The 42-prompt set also contains more function definitions than the mandatory set. 
+Since the implementation processes each request independently rather than appending 
+previous requests to a conversation history, a larger input file does not automatically 
+imply a longer LLM context for later requests.
+
+These observations are documented as limitations of the current implementation, 
+not as proof of a particular underlying cause.
+
+### Testing boundaries
+
+The test suites provide evidence of correct behavior on the supplied and supplementary 
+examples, but they do not establish general accuracy across arbitrary 
+natural-language requests.
+
+In particular:
+
+- Candidate-constrained decoding prevents unsupported output values when generation 
+succeeds, but does not guarantee the correct candidate is selected.
+- The regex implementation supports a bounded catalog of patterns rather than 
+arbitrary regex synthesis.
+- String extraction depends on the available candidate pool and the model's 
+interpretation of the request.
+- The test results are based on finite, manually prepared datasets and should 
+not be interpreted as a general statistical accuracy guarantee.
+
+No algorithm changes were made solely to eliminate the two documented failures 
+during the final testing and documentation stage.
+
+---
+
+## Performance Analysis
+
+Performance was measured using wall-clock time (`real`), user CPU time (`user`), 
+and system CPU time (`sys`).
+
+The reported measurements cover the executed commands rather than isolated LLM 
+inference calls. Depending on the test group, they can include input loading, 
+Pydantic validation, model initialization, tokenization, function selection, 
+parameter extraction, result serialization, and test-runner overhead.
+
+### Measured execution times
+
+| Test group | Real (s) | User (s) | Sys (s) |
+|---|---:|---:|---:|
+| Mandatory — 11 prompts | 48.07 | 12.24 | 11.13 |
+| Error cases — 9 scenarios | 29.61 | 21.43 | 12.89 |
+| Extended — 21 prompts | 107.91 | 20.09 | 12.92 |
+| Extended — 42 prompts | 202.10 | 33.32 | 12.31 |
+
+The mandatory run completed all 11 requests successfully in 48.07 seconds. 
+The 21-prompt suite completed in 107.91 seconds, while the 42-prompt suite 
+completed in 202.10 seconds.
+
+The observed wall-clock totals correspond to approximately:
+
+| Test group | Average elapsed time per prompt |
+|---|---:|
+| Mandatory — 11 prompts | 4.37 s |
+| Extended — 21 prompts | 5.14 s |
+| Extended — 42 prompts | 4.81 s |
+
+These averages divide the total elapsed time by the number of prompts. They 
+include shared startup and other command-level overhead, so they are not measurements 
+of isolated per-prompt inference latency.
+
+The error-case suite is excluded from this per-prompt comparison because its 
+scenarios exercise different failure paths and may terminate before inference.
+
+### Performance characteristics
+
+**Single model initialization**
+
+The application validates both input files before constructing the SDK model. 
+A single `Small_LLM_Model` instance is then reused across requests within the 
+same application run. This avoids loading a new model for every prompt.
+
+**Full-sequence function scoring**
+
+The hybrid selector scores complete candidate function names before deciding 
+whether additional capability comparisons are required. This gives the selector 
+information about entire candidate continuations, but requires multiple model 
+score calculations.
+
+**Conditional capability reranking**
+
+When the difference between the two highest-ranked function scores falls below 
+the configured `2.0` threshold, both functions receive additional Yes/No capability scoring.
+
+This limits the additional work to ambiguous rankings, but the reranking stage 
+still introduces inference overhead when activated.
+
+**Sequential parameter extraction**
+
+Parameters are extracted one at a time. The prompt for each parameter includes 
+previously extracted values as context. Constrained decoding may require multiple 
+next-token score calculations before a candidate is completed.
+
+As a result, processing time depends not only on the number of requests but also 
+on the available functions, parameter counts, candidate token lengths, and whether 
+capability reranking or regex processing is triggered.
+
+### Interpretation and limitations
+
+The 42-prompt suite contains twice as many requests as the 21-prompt suite and took 
+approximately 1.87 times as long in the recorded runs. This is consistent with 
+substantial per-request processing work, but it is not sufficient to establish a 
+general scaling law.
+
+The mandatory and extended datasets also differ in function definitions and request 
+complexity. Their execution times therefore should not be treated as a controlled 
+comparison of equivalent workloads.
+
+Additionally, the reported timings are individual run measurements. No repeated-run 
+variance, isolated model-loading benchmark, or separate inference-stage timing 
+analysis was recorded.
+
+The current measurements also do not provide a controlled comparison of the hybrid s
+elector against a full-score-only baseline. Therefore, the additional accuracy 
+attributable specifically to capability reranking cannot be quantified from these 
+results.
+
+### Overall assessment
+
+The final tested implementation produced correct complete function calls for all 
+11 mandatory requests and all 21 requests in the smaller extended suite. The larger 
+42-prompt suite achieved 95.2% exact-call accuracy, with correct function selection 
+in every case.
+
+All nine error-handling scenarios were successfully handled.
+
+The remaining failures concern semantic argument extraction, specifically an 
+empty string and a literal regex pattern. These limitations illustrate the 
+distinction between structurally valid output, constrained candidate selection, 
+and the intended meaning of a natural-language request.
+
+The recorded timings provide an initial end-to-end performance reference for 
+the current implementation, while more granular profiling and repeated measurements 
+would be required for a controlled performance comparison.
 
 ## Resources and AI usage
 

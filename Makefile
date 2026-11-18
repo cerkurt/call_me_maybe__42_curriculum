@@ -19,11 +19,11 @@ clean:
 
 lint:
 	uv run --with flake8 flake8 .
-	uv run mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
+	uv run python -m mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 
 lint-strict:
 	uv run --with flake8 flake8 .
-	uv run mypy . --strict
+	uv run python -m mypy . --strict
 
 .PHONY: test-errors test-21 test-42 compare-21 compare-42
 
