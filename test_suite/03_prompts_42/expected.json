@@ -1,0 +1,322 @@
+[
+    {
+        "prompt": "Add 2 and 3.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 2.0,
+            "b": 3.0
+        }
+    },
+    {
+        "prompt": "Add -12.5 and 0.75.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": -12.5,
+            "b": 0.75
+        }
+    },
+    {
+        "prompt": "What is the sum of 7 and 7?",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 7.0,
+            "b": 7.0
+        }
+    },
+    {
+        "prompt": "Greet Ceren.",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren"
+        }
+    },
+    {
+        "prompt": "Greet 'Alex Morgan'.",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Alex Morgan"
+        }
+    },
+    {
+        "prompt": "Greet 'İpek Yılmaz'.",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "İpek Yılmaz"
+        }
+    },
+    {
+        "prompt": "Reverse the string 'hello'.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "hello"
+        }
+    },
+    {
+        "prompt": "Reverse 'hello world' please.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "hello world"
+        }
+    },
+    {
+        "prompt": "Reverse the string 'a.b'.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "a.b"
+        }
+    },
+    {
+        "prompt": "Calculate the square root of 16.",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 16.0
+        }
+    },
+    {
+        "prompt": "What is the square root of 144?",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 144.0
+        }
+    },
+    {
+        "prompt": "Set the temperature to 18 degrees for room 'office'.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "office",
+            "degrees": 18.0
+        }
+    },
+    {
+        "prompt": "Set room 'living room' to -5.5 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "living room",
+            "degrees": -5.5
+        }
+    },
+    {
+        "prompt": "Set temperature for 'kitchen' to 0 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "kitchen",
+            "degrees": 0.0
+        }
+    },
+    {
+        "prompt": "Enable notifications for room 'office'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": true
+        }
+    },
+    {
+        "prompt": "Disable notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Turn off notifications for room 'living room'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "living room",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Echo 'Good morning'.",
+        "name": "echo_text",
+        "parameters": {
+            "text": "Good morning"
+        }
+    },
+    {
+        "prompt": "Echo 'Çağrı 🌡️'.",
+        "name": "echo_text",
+        "parameters": {
+            "text": "Çağrı 🌡️"
+        }
+    },
+    {
+        "prompt": "Replace all numbers in 'Room 12 and 345' with X.",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "Room 12 and 345",
+            "regex": "[0-9]+",
+            "replacement": "X"
+        }
+    },
+    {
+        "prompt": "Replace all vowels in 'Programming is fun' with asterisks.",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "Programming is fun",
+            "regex": "[aeiouAEIOU]",
+            "replacement": "*"
+        }
+    },
+    {
+        "prompt": "Add 0.5 and -0.5.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 0.5,
+            "b": -0.5
+        }
+    },
+    {
+        "prompt": "Add 1e3 and 2.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 1000.0,
+            "b": 2.0
+        }
+    },
+    {
+        "prompt": "Add 1,000 and 2.",
+        "name": "fn_add_numbers",
+        "parameters": {
+            "a": 1000.0,
+            "b": 2.0
+        }
+    },
+    {
+        "prompt": "Greet Ceren Kurt",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Ceren Kurt"
+        }
+    },
+    {
+        "prompt": "Greet the person named Captain Jack Sparrow",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Captain Jack Sparrow"
+        }
+    },
+    {
+        "prompt": "Say hello to my best friend Kenny.",
+        "name": "fn_greet",
+        "parameters": {
+            "name": "Kenny"
+        }
+    },
+    {
+        "prompt": "Reverse 'She said \"hello\"' please.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "She said \"hello\""
+        }
+    },
+    {
+        "prompt": "Reverse \"I'm Ceren\" please.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": "I'm Ceren"
+        }
+    },
+    {
+        "prompt": "Reverse '' please.",
+        "name": "fn_reverse_string",
+        "parameters": {
+            "s": ""
+        }
+    },
+    {
+        "prompt": "Calculate the square root of 0.",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 0.0
+        }
+    },
+    {
+        "prompt": "What is the square root of 0.25?",
+        "name": "fn_get_square_root",
+        "parameters": {
+            "a": 0.25
+        }
+    },
+    {
+        "prompt": "Set room 'attic' to .5 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "attic",
+            "degrees": 0.5
+        }
+    },
+    {
+        "prompt": "Set room 'lab' to 1e3 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "lab",
+            "degrees": 1000.0
+        }
+    },
+    {
+        "prompt": "Set room 'warehouse' to 1,000 degrees.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "warehouse",
+            "degrees": 1000.0
+        }
+    },
+    {
+        "prompt": "Turn on notifications for room 'bedroom'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "bedroom",
+            "enabled": true
+        }
+    },
+    {
+        "prompt": "Do not enable notifications for room 'office'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "office",
+            "enabled": false
+        }
+    },
+    {
+        "prompt": "Do not turn off notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": true
+        }
+    },
+    {
+        "prompt": "Echo 'こんにちは'.",
+        "name": "echo_text",
+        "parameters": {
+            "text": "こんにちは"
+        }
+    },
+    {
+        "prompt": "Echo ''.",
+        "name": "echo_text",
+        "parameters": {
+            "text": ""
+        }
+    },
+    {
+        "prompt": "Substitute 'cat' with 'dog' in 'The cat sat on the mat with another cat'.",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "The cat sat on the mat with another cat",
+            "regex": "cat",
+            "replacement": "dog"
+        }
+    },
+    {
+        "prompt": "Substitute 'a.b' with 'X' in 'a.b aXb a.b'.",
+        "name": "fn_substitute_string_with_regex",
+        "parameters": {
+            "source_string": "a.b aXb a.b",
+            "regex": "a\\.b",
+            "replacement": "X"
+        }
+    }
+]

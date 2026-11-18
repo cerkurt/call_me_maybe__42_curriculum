@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Define input and output schemas and validate extracted arguments.
 
 Pydantic models describe functions, prompts, and result records. The
@@ -12,9 +10,17 @@ from typing import Literal
 
 import math
 
-# `functions_definition.json` → `list[FunctionDefinition]`
-# `function_calling_tests.json` → `list[PromptTest]`
-# Output JSON → `list[FunctionCallResult]`
+
+class C:
+    """ANSI color codes used to make terminal output easier to read."""
+
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    RED = "\033[31m"
+    PURPLE = "\033[35m"
+    BG_RED = "\033[41m"
 
 
 class ParameterDefinition(BaseModel):
@@ -76,7 +82,7 @@ class FunctionCallResult(BaseModel):
 
 
 def parameter_type_checker(
-    function_object: FunctionDefinition, parameter_dict: dict
+    function_object: FunctionDefinition, parameter_dict: dict[str, object]
 ) -> None:
     """Check argument keys and Python value types against a function schema.
 
@@ -98,27 +104,27 @@ def parameter_type_checker(
     str and bool respectively. This checks schema compliance, not whether a
     value correctly represents the user's intended argument.
     """
-    parameters_from_function: list = []
+    parameters_from_function: list[str] = []
     for parameter_name, parameter_type in function_object.parameters.items():
         parameters_from_function.append(parameter_name)
 
-    parameters_from_dict: list = []
+    parameters_from_dict: list[str] = []
     for parameter_name, parameter_value in parameter_dict.items():
         parameters_from_dict.append(parameter_name)
 
     for parameter in parameters_from_function:
         if parameter not in parameters_from_dict:
             raise ValueError(
-                f"Missing parameter ({parameter}) in generated parameter "
-                f"dictionary."
+                f"Missing parameter {C.RED}({parameter}){C.RESET} "
+                f"in generated parameter dictionary."
             )
 
     for parameter in parameters_from_dict:
         if parameter not in parameters_from_function:
             raise ValueError(
-                f"Unexpected parameter ({parameter}) found in in generated "
-                f"parameter dictionary which is not part of function "
-                f"parameters."
+                f"Unexpected parameter {C.RED}({parameter}){C.RESET} "
+                f"found in generated parameter dictionary which is "
+                f"not part of function parameters."
             )
 
     for parameter_name, parameter_type in function_object.parameters.items():
@@ -132,11 +138,13 @@ def parameter_type_checker(
         ):
             raise ValueError(
                 f"Unexpected parameter value type for parameter "
-                f"'{parameter_name}' as '{parameter_value}'.\n"
+                f"'{C.RED}{parameter_name}{C.RESET}' as "
+                f"'{C.RED}{parameter_value}{C.RESET}'.\n"
                 f"Current parameter value type is "
-                f"{type(parameter_value).__name__} but must be part of 'int'"
-                f" or 'float' class."
+                f"{C.YELLOW}{type(parameter_value).__name__}{C.RESET} "
+                f"but must be part of 'int' or 'float' class."
             )
+
         elif parameter_type.type == "number" and (
             isinstance(parameter_value, float)
             and not math.isfinite(parameter_value)
@@ -145,15 +153,17 @@ def parameter_type_checker(
                 "Infinite number generated. Unsupported number to write in a "
                 "standard JSON file."
             )
+
         elif parameter_type.type == "string" and not isinstance(
             parameter_value, str
         ):
             raise ValueError(
                 f"Unexpected parameter value type for parameter "
-                f"'{parameter_name}' as {parameter_value}'.\n"
+                f"'{C.RED}{parameter_name}{C.RESET}' as "
+                f"'{C.RED}{parameter_value}{C.RESET}'.\n"
                 f"Current parameter value type is "
-                f"{type(parameter_value).__name__} but must be part of 'str' "
-                f"class."
+                f"{C.YELLOW}{type(parameter_value).__name__}{C.RESET} "
+                f"but must be part of 'str' class."
             )
 
         elif parameter_type.type == "boolean" and not isinstance(
@@ -161,8 +171,9 @@ def parameter_type_checker(
         ):
             raise ValueError(
                 f"Unexpected parameter value type for parameter "
-                f"'{parameter_name}' as '{parameter_value}'.\n"
+                f"'{C.RED}{parameter_name}{C.RESET}' as "
+                f"'{C.RED}{parameter_value}{C.RESET}'.\n"
                 f"Current parameter value type is "
-                f"{type(parameter_value).__name__} but must be part of 'bool'"
-                f"class."
+                f"{C.YELLOW}{type(parameter_value).__name__}{C.RESET} "
+                f"but must be part of 'bool' class."
             )

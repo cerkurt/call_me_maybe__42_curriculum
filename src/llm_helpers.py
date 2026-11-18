@@ -7,7 +7,6 @@ generated candidate prefixes separate from their full model context.
 
 from llm_sdk import Small_LLM_Model
 
-
 import math
 
 
@@ -27,8 +26,9 @@ def format_request_message(identity: str, content: str) -> str:
 
 
 def find_allowed_next_token_ids(
-    name_id_pair: dict, candidate_id_list: list
-) -> list:
+    name_id_pair: dict[str, list[int]],
+    candidate_id_list: list[int],
+) -> list[int]:
     """Find unique token IDs that can extend the current candidate prefix.
 
     Args:
@@ -43,7 +43,7 @@ def find_allowed_next_token_ids(
 
     Neither the candidate mapping nor the generated prefix is modified.
     """
-    allowed_id_list: set = set()
+    allowed_id_list: set[int] = set()
     for name, token_id in name_id_pair.items():
         if (token_id[: len(candidate_id_list)] == candidate_id_list) and len(
             token_id
@@ -54,7 +54,10 @@ def find_allowed_next_token_ids(
     return list(allowed_id_list)
 
 
-def select_next_token_id(logit_list: list, allowed_token_ids: list) -> int:
+def select_next_token_id(
+    logit_list: list[float],
+    allowed_token_ids: list[int],
+) -> int:
     """Mask logits in place and return the index of the highest score.
 
     Args:
@@ -75,7 +78,7 @@ def select_next_token_id(logit_list: list, allowed_token_ids: list) -> int:
     neg_infinite = float("-inf")
 
     if len(allowed_token_ids) == 0:
-        raise ValueError("There are no allowed token ids in the given list")
+        raise ValueError("There are no allowed token ids in the given list.")
 
     list_to_set = set(allowed_token_ids)
     # Equal scores can belong to different IDs; enumerate tracks positions.
@@ -122,7 +125,7 @@ def generate_name_from_candidates(
     encode_result = model_object.encode(selection_prompt)
     all_token_ids = encode_result[0].tolist()
 
-    generated_token_ids: list = []
+    generated_token_ids: list[int] = []
 
     allowed_token_ids = find_allowed_next_token_ids(
         function_id_match, generated_token_ids
@@ -192,21 +195,3 @@ def score_function_candidate(
         context_ids.append(token_id)
 
     return total_score
-
-
-# def generate_name_by_full_scoring(
-#     model_object,
-#     selection_prompt: str,
-#     function_id_match: dict,
-# ) -> str:
-
-#     scores: dict[str, float] = {
-#         function_name: score_function_candidate(
-#             model_object,
-#             selection_prompt,
-#             function_name,
-#         )
-#         for function_name in function_id_match
-#     }
-
-#     return max(scores, key=lambda name: scores[name])

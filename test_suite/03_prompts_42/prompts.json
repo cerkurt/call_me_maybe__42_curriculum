@@ -1,0 +1,128 @@
+[
+    {
+        "prompt": "Add 2 and 3."
+    },
+    {
+        "prompt": "Add -12.5 and 0.75."
+    },
+    {
+        "prompt": "What is the sum of 7 and 7?"
+    },
+    {
+        "prompt": "Greet Ceren."
+    },
+    {
+        "prompt": "Greet 'Alex Morgan'."
+    },
+    {
+        "prompt": "Greet 'İpek Yılmaz'."
+    },
+    {
+        "prompt": "Reverse the string 'hello'."
+    },
+    {
+        "prompt": "Reverse 'hello world' please."
+    },
+    {
+        "prompt": "Reverse the string 'a.b'."
+    },
+    {
+        "prompt": "Calculate the square root of 16."
+    },
+    {
+        "prompt": "What is the square root of 144?"
+    },
+    {
+        "prompt": "Set the temperature to 18 degrees for room 'office'."
+    },
+    {
+        "prompt": "Set room 'living room' to -5.5 degrees."
+    },
+    {
+        "prompt": "Set temperature for 'kitchen' to 0 degrees."
+    },
+    {
+        "prompt": "Enable notifications for room 'office'."
+    },
+    {
+        "prompt": "Disable notifications for room 'kitchen'."
+    },
+    {
+        "prompt": "Turn off notifications for room 'living room'."
+    },
+    {
+        "prompt": "Echo 'Good morning'."
+    },
+    {
+        "prompt": "Echo 'Çağrı 🌡️'."
+    },
+    {
+        "prompt": "Replace all numbers in 'Room 12 and 345' with X."
+    },
+    {
+        "prompt": "Replace all vowels in 'Programming is fun' with asterisks."
+    },
+    {
+        "prompt": "Add 0.5 and -0.5."
+    },
+    {
+        "prompt": "Add 1e3 and 2."
+    },
+    {
+        "prompt": "Add 1,000 and 2."
+    },
+    {
+        "prompt": "Greet Ceren Kurt"
+    },
+    {
+        "prompt": "Greet the person named Captain Jack Sparrow"
+    },
+    {
+        "prompt": "Say hello to my best friend Kenny."
+    },
+    {
+        "prompt": "Reverse 'She said \"hello\"' please."
+    },
+    {
+        "prompt": "Reverse \"I'm Ceren\" please."
+    },
+    {
+        "prompt": "Reverse '' please."
+    },
+    {
+        "prompt": "Calculate the square root of 0."
+    },
+    {
+        "prompt": "What is the square root of 0.25?"
+    },
+    {
+        "prompt": "Set room 'attic' to .5 degrees."
+    },
+    {
+        "prompt": "Set room 'lab' to 1e3 degrees."
+    },
+    {
+        "prompt": "Set room 'warehouse' to 1,000 degrees."
+    },
+    {
+        "prompt": "Turn on notifications for room 'bedroom'."
+    },
+    {
+        "prompt": "Do not enable notifications for room 'office'."
+    },
+    {
+        "prompt": "Do not turn off notifications for room 'kitchen'."
+    },
+    {
+        "prompt": "Echo 'こんにちは'."
+    },
+    {
+        "prompt": "Echo ''."
+    },
+    {
+        "prompt": "Substitute 'cat' with 'dog' in 'The cat sat on the mat with another cat'."
+    },
+    {
+        "prompt": "Substitute 'a.b' with 'X' in 'a.b aXb a.b'."
+    }
+]

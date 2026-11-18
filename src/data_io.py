@@ -4,14 +4,30 @@ Keep file handling separate from model inference. Input errors propagate
 to callers; result serialization finishes before the output file opens.
 """
 
-import json
 from pathlib import Path
-
+from typing import TypeVar
 from pydantic import BaseModel
+
 from . import data_models
 
+import json
 
-def load_json_file(path: str) -> list:
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+class C:
+    """ANSI color codes used to make terminal output easier to read."""
+
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    RED = "\033[31m"
+    PURPLE = "\033[35m"
+    BG_RED = "\033[41m"
+
+
+def load_json_file(path: str) -> list[object]:
     """Read a UTF-8 JSON file whose root must be an array.
 
     Args:
@@ -31,12 +47,12 @@ def load_json_file(path: str) -> list:
         loaded_file = json.load(file_to_load)
 
     if not isinstance(loaded_file, list):
-        raise ValueError("[load_json_file()] Loaded JSON data must be a list.")
+        raise ValueError("Loaded JSON data must be a list.")
 
     return loaded_file
 
 
-def model_validation(path: str, model_class: type[BaseModel]) -> list:
+def model_validation(path: str, model_class: type[TModel]) -> list[TModel]:
     """Load dictionary entries and construct the requested Pydantic models.
 
     Args:
@@ -57,12 +73,10 @@ def model_validation(path: str, model_class: type[BaseModel]) -> list:
     """
     json_file = load_json_file(path)
 
-    valid_list = []
+    valid_list: list[TModel] = []
     for list_element in json_file:
         if not isinstance(list_element, dict):
-            raise ValueError(
-                "[model_validation()] Elements of JSON list must be dict."
-            )
+            raise ValueError("Elements of JSON list must be dict.")
 
         # ** passes dictionary keys and values as named model arguments.
         valid_data = model_class(**list_element)
@@ -70,9 +84,7 @@ def model_validation(path: str, model_class: type[BaseModel]) -> list:
 
     if model_class is data_models.FunctionDefinition:
         if not valid_list:
-            raise ValueError(
-                "model_validation(). Function list cannot be empty."
-            )
+            raise ValueError("Function list cannot be empty.")
 
         function_names = []
 
@@ -83,8 +95,8 @@ def model_validation(path: str, model_class: type[BaseModel]) -> list:
 
                 if function.name in function_names:
                     raise ValueError(
-                        f"model_validation(). "
-                        f"Duplicate function name: {function.name}"
+                        f"Duplicate function name: "
+                        f"{C.RED}{function.name}{C.RESET}"
                     )
 
                 function_names.append(function.name)
@@ -115,7 +127,7 @@ def write_results(
     file untouched. Successful writing replaces its previous contents and
     preserves literal Unicode characters with ensure_ascii=False.
     """
-    model_to_dict_list = []
+    model_to_dict_list: list[dict[str, object]] = []
 
     for model in results:
         result_dict = model.model_dump()

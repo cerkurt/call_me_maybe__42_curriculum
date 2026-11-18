@@ -2,9 +2,9 @@
 
 # call_me_maybe
 
-A local function-calling tool that translates natural-language requests into
-function names and typed arguments using a small language model and
-token-by-token constrained decoding.
+A local function-calling tool that translates natural-language requests into 
+function names and typed arguments using a small language model, hybrid function selection, 
+and token-level constrained argument extraction.
 
 ## Contents
 
@@ -45,7 +45,7 @@ function or calculate its return value.
 
 Function definitions are supplied through JSON files. Their names,
 descriptions, parameter names, and declared types drive the selection and
-validation process. The current supported parameter and return type
+validation process. The currently supported parameter and return type
 declarations are `number`, `string`, and `boolean`.
 
 The supplied `Small_LLM_Model` SDK loads `Qwen/Qwen3-0.6B` by default.
@@ -55,79 +55,98 @@ continuations are masked before the next token is selected. Function-name
 selection instead scores complete available names and may rerank the two
 leaders with a separate capability prompt.
 
-**Current documentation snapshot — November 17, 2026:** The implementation uses
-hybrid full-sequence/capability scoring for function selection and finite-candidate,
-token-level constrained decoding for argument extraction. Testing now includes the
-original 11-prompt input, a 55-prompt regression set, a separate 31-prompt
-seven-function generalization set, and a curated 76-prompt combined regression set.
-See [Testing strategy](#testing-strategy) for exact results and limitations.
-
-
 ## Instructions
 
 ### Requirements and installation
 
-- Python **3.10+**, as specified by `pyproject.toml` and the subject.
-- [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Python **3.10+**, as specified in `pyproject.toml` and the project subject.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency and environment management.
 - The supplied `llm_sdk/` workspace package.
-- Internet access for first-time dependency and model downloads; cached model files
-  are reused in later runs.
+- Internet access for the initial dependency and model downloads. Subsequent runs can reuse cached model files.
 
-Install the workspace dependencies from the repository root:
+From the repository root, install the project dependencies:
+
+```bash
+make install
+```
+
+This target runs `uv sync`. Alternatively, the same installation can be performed directly:
 
 ```bash
 uv sync
 ```
 
-The current writer creates missing parent directories automatically with
-`Path(path).parent.mkdir(parents=True, exist_ok=True)`. A separate `mkdir`
-step is unnecessary for normal execution.
+The application automatically creates missing output directories when writing results. 
+Generated files under `data/output/` are excluded from Git and are not included in the 
+submitted repository.
 
-`data/output/` is generated locally and must not be included in the submitted
-repository. The ignore rule prevents new untracked outputs from being added
-normally; it does not remove files already tracked by Git. Before submitting,
-check that `git ls-files data/output` returns no tracked output files.
+### Run the provided 11-prompt input
 
-### Run the provided 11-prompt input (standard CLI)
+Run the application using its default input and output paths:
+
+```bash
+make run
+```
+
+The equivalent Python CLI command is:
 
 ```bash
 uv run python -m src
 ```
 
-Equivalent explicit form:
+The default paths are:
 
-```bash
-uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
-  --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
-```
+| CLI option | Default path |
+|---|---|
+| `--functions_definition` | `data/input/functions_definition.json` |
+| `--input` | `data/input/function_calling_tests.json` |
+| `--output` | `data/output/function_calling_results.json` |
 
-The standard command processes the whole list and writes **one JSON array**.
-A processing error stops that batch rather than automatically skipping the prompt.
+The standard CLI processes the provided prompts and writes a single JSON array containing 
+their generated function calls. Each result includes the original prompt, selected 
+function name, and extracted parameters.
 
-### Run one custom prompt immediately
+The `make run` target also measures total execution time using `/usr/bin/time -p`. 
+The reported `real` value represents the elapsed wall-clock time, including startup, model initialization, 
+generation, and output writing.
 
-Prepare a one-request JSON list, using the existing default function definitions:
+If an error occurs during processing, the standard CLI stops the batch and does not 
+write a new partial result file.
+
+### Run one custom prompt
+
+To test an individual request using the default function definitions, create a JSON file 
+containing one prompt:
 
 ```bash
 printf '[{"prompt":"What is the sum of 40 and 2?"}]\n' > /tmp/cmm_one_prompt.json
+```
 
+Run the application with the custom input path:
+
+```bash
 uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
   --input /tmp/cmm_one_prompt.json \
   --output data/output/one_prompt_result.json
+```
 
+Inspect the generated JSON:
+
+```bash
 uv run python -m json.tool data/output/one_prompt_result.json
 ```
 
-You can replace the text in `/tmp/cmm_one_prompt.json` with another request;
-keep the `[{"prompt": "..."}]` input structure. Escape quotes appropriately.
+The request text can be replaced with another prompt. The input file must remain a JSON 
+array of objects containing the `prompt` field. Special characters and quotation marks 
+must follow valid JSON escaping rules.
 
-### Run tests using different function definitions
+### Run with custom function definitions
 
-The CLI does not depend on hardcoded function names. It accepts function definitions,
-prompts, and output paths independently:
+The application reads available function names, descriptions, and parameter types from 
+the supplied JSON definitions. It does not require hardcoded selection rules for individual 
+function names.
+
+Custom function definitions, prompts, and output paths can be supplied independently:
 
 ```bash
 uv run python -m src \
@@ -136,90 +155,83 @@ uv run python -m src \
   --output data/output/custom_results.json
 ```
 
-The extended fixtures are optional development files, not official
-evaluation data. In the current workspace they are **outside** the repository:
+This allows the same application to process different sets of functions and natural-language 
+requests without modifying the source code.
 
-```text
-call_me_maybe/
-├── project_repo/           # Run the CLI here
-├── test_inputs/            # Local 55- and 31-request fixtures
-└── combined_evaluation/    # Local 76-request fixture and stored report
-```
+The standard CLI stops processing if a request raises an error. It does not automatically 
+skip failed requests or evaluate generated calls against expected answers.
 
-For the local 55-request fixture, run from `project_repo/`:
+### CLI help and output inspection
 
-```bash
-uv run python -m src \
-  --functions_definition ../test_inputs/mandatory_functions.json \
-  --input ../test_inputs/mandatory_prompts.json \
-  --output data/output/mandatory_results.json
-```
-
-For the local combined definitions and requests:
-
-```bash
-uv run python -m src \
-  --functions_definition ../combined_evaluation/combined_functions.json \
-  --input ../combined_evaluation/combined_prompts.json \
-  --output data/output/combined_cli_results.json
-```
-
-The normal CLI stops the batch on a processing error. It does not continue
-past a failed request, unlike the historical per-request diagnostic runner.
-The combined CLI command can therefore stop without writing a new file.
-These parent-directory fixtures are not available in a fresh clone unless
-supplied separately; the default `data/input/` files are the portable example.
-
-The stored combined report was produced with a runner that catches errors
-per request while reusing one model. Its current local script is **not ready
-to rerun unchanged**: it resolves the project location from an older layout
-and searches for `src.llm_progress_builder` or `src.generators`, whereas the
-current pipeline is `src.generation_flow`. Update those runner references
-before using it; this README does not present its old command as a working
-entry point for the current checkout.
-
-### CLI help and inspection
+Display the available command-line options:
 
 ```bash
 uv run python -m src --help
+```
+
+Inspect the default output file:
+
+```bash
 uv run python -m json.tool data/output/function_calling_results.json
 ```
 
+The JSON inspection command checks syntax and displays the generated structure. It does not 
+verify whether the selected function or argument values match the user's intended request.
+
 ### Error handling
 
-Malformed JSON, missing files, Pydantic validation failures, unsupported parameter
-types, exhausted generation, and output-writing errors are reported at the CLI
-boundary. Handled errors return a nonzero status and a descriptive message.
+The application reports input, validation, generation, and output-writing errors at the CLI 
+boundary. Handled failures terminate execution with a nonzero exit status and a descriptive 
+error message.
 
-Input validation also rejects empty function definition lists and duplicate function
-names (tested as of November 17). An empty prompt **list** is allowed; a prompt
-containing an empty **string** is distinct from an empty list.
+These include missing input files, malformed JSON, invalid Pydantic models, unsupported 
+parameter types, exhausted generation, and file-writing failures.
 
-The constrained decoder prevents out-of-candidate continuations, but it cannot
-guarantee that the model will choose the semantically correct candidate.
+Input validation also rejects empty function definition lists, blank function names, and 
+duplicate function names.
+
+An empty prompt list is allowed and produces an empty result array. This is different from a list 
+containing a prompt with an empty string, which represents a request entry with no text.
+
+The application validates output parameter names and declared types before writing the results. 
+Structural validation does not guarantee that the selected function and arguments are 
+semantically correct.
 
 ### Code-quality checks
 
-The subject's mandatory `lint` check includes flake8 and all of these mypy flags:
+The included Makefile provides the required targets:
+
+| Command | Description |
+|---|---|
+| `make install` | Install and synchronize project dependencies. |
+| `make run` | Run the application and report execution time. |
+| `make debug` | Run the application with Python's `pdb` debugger. |
+| `make clean` | Remove Python bytecode and development cache directories. |
+| `make lint` | Run Flake8 and mypy with the mandatory project flags. |
+| `make lint-strict` | Run Flake8 and mypy with `--strict` (additional check). |
+
+Run the required code-quality checks:
 
 ```bash
-uv run --with flake8 flake8 .
-uv run mypy . \
-  --warn-return-any \
-  --warn-unused-ignores \
-  --ignore-missing-imports \
-  --disallow-untyped-defs \
-  --check-untyped-defs
+make lint
 ```
 
-The included Makefile provides `make install`, `make run`, `make debug`,
-`make clean`, and `make lint`. `make run` also prints elapsed time through
-`/usr/bin/time -p`. The optional `make lint-strict` runs mypy with `--strict`;
-passing the mandatory flags does not imply that this stronger mode passes.
+The `lint` target runs Flake8 and mypy with all flags required by the project subject:
 
-The development lint errors reported in the older November 16 snapshot have
-since been addressed; both flake8 and the mandatory mypy flags were reported
-clean during the November 17 review. Re-run them on the final committed tree.
+- `--warn-return-any`
+- `--warn-unused-ignores`
+- `--ignore-missing-imports`
+- `--disallow-untyped-defs`
+- `--check-untyped-defs`
+
+For additional type checking:
+
+```bash
+make lint-strict
+```
+
+The supplied SDK and configured development/test directories are excluded from direct lint checks. 
+The application's production code remains subject to validation.
 
 ## Input and output formats
 
@@ -269,8 +281,8 @@ Each item is validated as a `PromptTest`.
 
 ### Results
 
-Each request produces one `FunctionCallResult` with exactly these output
-fields:
+Each successfully processed request produces one FunctionCallResult containing 
+the following output fields:
 
 | Field | Meaning |
 |---|---|
@@ -278,43 +290,67 @@ fields:
 | `name` | The selected function name. |
 | `parameters` | The complete dictionary of extracted argument values. |
 
-Numbers and booleans are JSON values rather than quoted type names:
+### JSON value types
+
+Parameter types are declared as `"number"`, `"string"`, or `"boolean"` in the 
+function definitions. However, the generated output contains actual JSON values, 
+not their type names.
+
+For example, with appropriate custom function definitions, the output may look like this:
 
 ```json
-{
-    "prompt": "Disable notifications for room 'kitchen'.",
-    "name": "set_notifications",
-    "parameters": {
-        "room": "kitchen",
-        "enabled": false
+[
+    {
+        "prompt": "Set the temperature to 18 degrees for room 'office'.",
+        "name": "set_temperature",
+        "parameters": {
+            "room": "office",
+            "degrees": 18.0
+        }
+    },
+    {
+        "prompt": "Disable notifications for room 'kitchen'.",
+        "name": "set_notifications",
+        "parameters": {
+            "room": "kitchen",
+            "enabled": false
+        }
     }
-}
+]
 ```
 
-Both `7` and `7.0` satisfy the declared `number` type. The current numeric
-extractor converts matching text into Python floats.
+In the output:
+
+- `"office"` and `"kitchen"` are JSON strings.
+- `18.0` is a JSON number, not a quoted string.
+- `false` is a JSON boolean, not the string `"false"`.
+
+The current numeric extractor converts recognized numeric values to Python `float` objects. 
+JSON supports both integer and floating-point number representations for parameters 
+declared as `"number"`.
 
 ## Project structure
 
-The repository separates application responsibilities into these modules:
+The application separates command-line execution, data validation, model inference, 
+and argument extraction into dedicated modules:
 
 ```text
 .
 ├── src/
-│   ├── __init__.py             # Package description
-│   ├── __main__.py             # CLI paths, model initialization, errors
-│   ├── data_io.py              # JSON loading, model validation, writing
-│   ├── data_models.py          # Schemas and final argument-key/type checks
-│   ├── generation_flow.py      # Per-request selection/extraction pipeline
-│   ├── function_selectors.py   # Name ranking and capability reranking
-│   ├── parameter_extractors.py # String/number pools and argument prompts
-│   ├── llm_helpers.py          # Chat formatting, token masks, name scores
-│   ├── regex_helpers.py        # Pattern options and replacement conversion
-│   └── old_function_helpers.py # Earlier experiments outside the CLI path
+│   ├── __init__.py              # Package initialization
+│   ├── __main__.py              # CLI, model initialization, error handling
+│   ├── data_io.py               # JSON loading, validation, and writing
+│   ├── data_models.py           # Pydantic schemas and parameter type checks
+│   ├── generation_flow.py       # Main function-calling pipeline
+│   ├── function_selectors.py    # Function ranking and capability reranking
+│   ├── parameter_extractors.py  # Argument candidates and extraction prompts
+│   ├── llm_helpers.py           # Token scoring and constrained decoding
+│   └── regex_helpers.py         # Regex candidate selection and replacement
 ├── data/
-│   ├── input/                  # Default demonstration definitions/prompts
-│   └── output/                 # Generated locally; exclude from submission
-├── llm_sdk/                    # Supplied uv workspace dependency
+│   ├── input/                   # Default function definitions and prompts
+│   └── output/                  # Created at runtime; excluded from Git
+├── tests/                       # Additional tests and evaluation utilities
+├── llm_sdk/                     # Supplied uv workspace package
 ├── pyproject.toml
 ├── uv.lock
 ├── Makefile
@@ -324,25 +360,22 @@ The repository separates application responsibilities into these modules:
 └── README.md
 ```
 
-`__main__.py` calls `generation_flow.progress_builder()`. The flow module
-uses the selector, extractor, regex, and shared LLM helpers. It does not
-import `old_function_helpers.py`; that module retains the earlier decoding
-experiments. The former `generators.py`, `llm_progress_builder.py`, and
-repository-root `sdk_playground.py` are not current application entry points.
+The entry point, `src/__main__.py`, calls `generation_flow.progress_builder()`, which coordinates 
+function selection, parameter extraction, regex handling, and final result validation.
 
-Local test fixtures in `../test_inputs/` and `../combined_evaluation/` are
-outside this tree. A `docs/architecture/` export directory is not currently
-included in this checkout.
+The output directory is generated automatically when results are written and is not i
+ncluded in the submitted repository.
 
 ## Architecture diagram
 
-An external editable diagram is available on
-[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?t=VYSTQmxtIs2KLD0C-1).
-The board's contents were not verified against the current source during
-this review. Its previously referenced PDF export and four PNG previews
-are not present in `docs/architecture/`, so no missing local image links
-are included here. The repository-contained Mermaid diagrams below describe
-the source-code flow without requiring those exports.
+A detailed, interactive flowchart of the application is available on 
+[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?node-id=0-1&p=f&t=P96hPD09sWdrDlUF-0).
+
+The diagram illustrates the complete execution flow, including input validation, hybrid 
+function selection, parameter extraction, constrained decoding, regex handling, and result serialization.
+
+A simplified Mermaid diagram is included in the following section to provide a 
+high-level overview of the algorithm.
 
 ## Algorithm explanation
 
@@ -355,7 +388,7 @@ flowchart TD
   C --> D[For each user request]
   D --> E[Hybrid function selection]
   E --> F[Find selected FunctionDefinition]
-  F --> G[Extract each typed parameter from candidate pool]
+  F --> G[Extract parameters using constrained decoding]
   G --> H[Optional regex post-processing]
   H --> I[Validate parameters and create FunctionCallResult]
   I --> J{More requests?}
@@ -392,7 +425,7 @@ and user chat messages are followed by the open assistant prefix:
 
 `llm_helpers.score_function_candidate()` evaluates a **known continuation**.
 It encodes one function name and scores all its tokens in order. At each
-step it obtains logits, converts the specified token's score into a log
+step, it obtains logits, converts the specified token's score into a log
 probability, then appends that specified token to the context to score
 the next one. It does not select the highest-logit token at that step.
 The prompt context is reset before evaluating the next candidate name.
@@ -402,16 +435,16 @@ name_score = sum of log P(token_i | prompt and earlier name tokens)
 ```
 
 The code computes the normalization with a stable log-sum-exp calculation:
-it subtracts the largest logit before exponentiation. The final score is
+It subtracts the largest logit before exponentiation. The final score is
 a sum of conditional log-probabilities, not a percentage. A larger score
 is better; for example, -1.2 ranks above -4.6. Scores are not divided by
 the number of tokens, so candidate-name length can affect ranking.
 
-Why compare complete names? The earlier greedy decoder committed to the
-strongest allowed next token before evaluating the rest of each possible
-name. A locally preferred token does not necessarily begin the strongest
-complete continuation. Consider these **invented** scores after a shared
-prefix, with two tokens left in each candidate:
+Why compare complete names? A greedy token-by-token decoder commits to the 
+strongest allowed next token without evaluating the full continuation of 
+every candidate. A locally preferred token does not necessarily begin 
+the strongest complete continuation. Consider these **invented** scores 
+after a shared prefix, with two tokens left in each candidate:
 
 | Candidate | First differing token | Following token | Total |
 |---|---:|---:|---:|
@@ -459,13 +492,22 @@ Yes/No explanation. The larger difference wins. If capability scores
 tie, the original full-score leader wins. The original leader is also
 returned when it is the only candidate after scoring.
 
+The `2.0` threshold is a heuristic applied to the difference between accumulated
+log-probability scores. It is not a calibrated confidence percentage. A larger
+threshold would trigger capability reranking more often, potentially increasing
+execution time without necessarily improving accuracy.
+
 For an **illustrative** example, full scores -2.1 and -2.8 have a margin
 of 0.7, which triggers the extra check. If the capability differences
 are 0.2 and 3.0 respectively, the second candidate replaces the original
 leader. With scores -1.0 and -4.0, the margin is 3.0 and no extra check runs.
 These numbers explain control flow; they are not measured test outputs.
 
-#### Why the extra stage was introduced, and what it costs
+Capability reranking considers only the two highest-ranked functions from the first
+stage. Therefore, it cannot recover the correct function if that function was
+ranked outside the top two.
+
+#### Why the extra stage was introduced and what it costs
 
 The additional question separates two judgments: how likely the function's
 name is as a continuation of the selection prompt, and whether that
@@ -482,28 +524,23 @@ functions. Each score can require multiple SDK logit calls. All function
 names are already scored before the margin check, so this approach does
 more work than one greedy name continuation.
 
-This design provides a complete-name comparison and a bounded opportunity
-to revise an ambiguous ranking. The recorded hybrid tests show its actual
-successes and failures, but there is no controlled full-score-only versus
-hybrid benchmark here proving how much accuracy the extra stage adds.
+This design provides a complete-name comparison and a bounded opportunity to 
+revise an ambiguous ranking, at the cost of additional inference.
 
-The **2.0** threshold is a score-difference heuristic, not 90% confidence
-and not the subject's 90% accuracy target. It can skip a useful capability
-check, and only the top two names are reconsidered. In the stored `NEW-10`
-diagnostic, the correct reminder function ranked fifth and the first two
-names were separated by 2.2146, so the normal hybrid path did not reconsider
-the correct function. These limits are retained rather than changing the
-algorithm during documentation review.
+The `2.0` threshold is a heuristic based on the difference between accumulated 
+log-probability scores, not a calibrated confidence measure. A large margin can 
+skip a potentially useful capability check. Furthermore, reranking is limited to 
+the top two candidates, so it cannot recover a correct function ranked lower. 
+
+Increasing the threshold would trigger more reranking but would not eliminate 
+this shortlist limitation.
 
 #### Relation to constrained argument decoding
 
 Function selection returns a name from the supplied definitions by scoring
 fixed names and, when needed, capability answers. After that, argument
 values and regex option codes use `generate_name_from_candidates()` with
-token-prefix constraints and logit masking. The similar helper names do
-not mean that function selection and argument generation execute the same
-algorithm. The old standalone `generate_name_by_full_scoring()` helper is
-commented out; active full scoring occurs inside the hybrid selector.
+token-prefix constraints and logit masking.
 
 ### 2. Determine parameter extraction strategy
 
@@ -550,9 +587,9 @@ greedy selection, rather than random sampling. At every generation step:
 3. `select_next_token_id()` masks every disallowed logit to `-inf`,
    without changing token indexes, and selects the strongest allowed ID.
 4. The generated ID extends both the full model context and the
-   candidate-matching prefix. Generation stops at a complete candidate
-   or raises an error when no continuation is possible / the limit is
-   exhausted.
+   candidate-matching prefix. Generation stops when a complete candidate is
+   reached. A `ValueError` is raised if no valid continuation is available
+   or the generation token limit is exhausted.
 
 For illustration, imagine that two candidate values are encoded as:
 
@@ -574,8 +611,7 @@ ordinary parameters have been visited.
 
 A constrained output is **guaranteed to be selected from the supplied
 candidates when generation succeeds**, but it is not guaranteed to be
-the semantically correct choice. The `Ceren Kurt` failure demonstrates
-this distinction.
+the semantically correct choice.
 
 ### 4. Complete regex parameters when recognized
 
@@ -587,8 +623,8 @@ name.
 The `regex` field is skipped during the ordinary extraction loop; the
 other parameters are extracted first. After the loop:
 
-1. `convert_regex_replacement_value()` can normalize certain unquoted
-   character names (for example, `asterisks` becomes `*`).
+1. `convert_regex_replacement_value()` normalizes supported unquoted character 
+   punctuation — plus eligible request-derived quoted literals.
 2. `regex_candidate_generator()` provides seven category patterns —
    vowels, letters, digit sequences, uppercase, lowercase, whitespace,
    punctuation — plus eligible request-derived quoted literals.
@@ -614,47 +650,60 @@ Successful requests yield one `FunctionCallResult` each, with precisely
 `model_dump()` provides Python dictionaries, and
 `json.dumps(..., allow_nan=False)` serializes the array to UTF-8 JSON.
 
-Pydantic and the final parameter checker validate **structure and types**.
-They cannot prove that a chosen function or argument corresponds to the
-user's intended meaning. This is why semantic comparisons against expected
-calls are included in the test strategy.
+Successful requests yield one `FunctionCallResult` each, containing `prompt`, 
+`name`, and `parameters`. After the request loop completes, `model_dump()` converts 
+the result models into Python dictionaries, and `json.dumps(..., allow_nan=False)` 
+serializes the complete list. The output writer creates missing parent directories and 
+writes the resulting JSON text using UTF-8 encoding.
 
-### Historical experiments
-
-Earlier development also explored unrestricted JSON-string generation and
-quote/escape/unicode state machines (`get_json_string_state()`,
-`find_allowed_string_token_ids()`, and `generate_json_string()`). These
-experiments informed debugging but are not the current parameter-value
-production path.
+Pydantic and the final parameter checker validate structure and types. They cannot prove 
+that a chosen function or argument corresponds to the user's intended meaning. 
+This distinction is evaluated separately in the testing strategy.
 
 ## Design decisions
 
-- **Separate I/O, data models, generation, and orchestration.** Loading a file
-  and selecting a model continuation have different responsibilities.
-  Reusable functions receive paths, validated objects, or an existing SDK
-  model as appropriate.
-- **Reuse one model instance.** Model loading happens once after the input
-  files have been validated.
-- **Read function metadata from the supplied definitions.** The selection
-  pipeline does not contain a branch for each sample function name.
-- **Use explicit candidate constraints.** Prompt wording provides context;
-  the logit mask restricts which candidate continuations can be selected.
-- **Retain extraction context.** Previously extracted parameters accompany
-  the current parameter request.
-- **Share prompt assembly across parameter types.** A type-specific system
-  instruction is selected inside one builder, while function metadata,
-  previous values, chat roles, and the open JSON prefix use one structure.
-- **Expand the pool before constraining selection.** Word n-grams make
-  multiword values available without assuming every quoted phrase is the
-  desired argument. The token mask then restricts selection to that pool.
-- **Accumulate one complete result per request.** Parameter dictionaries
-  are initialized outside the inner parameter loop.
-- **Report errors at the CLI boundary.** Lower-level loading and validation
-  functions propagate errors; handled failures terminate the command.
-- **Retain earlier experiments separately.** `old_function_helpers.py`
-  contains the previous text/string decoding experiments. The current
-  production modules do not import it; the former repository-root
-  playground is no longer an execution entry point.
+- **Separate I/O, data models, generation, and orchestration.** Each module
+  has a distinct responsibility. Reusable functions receive file paths, validated
+  objects, or an existing SDK model rather than managing unrelated tasks.
+
+- **Reuse one model instance.** The SDK model is initialized once, after input
+  validation, and shared across requests to avoid repeated loading costs.
+
+- **Use dynamic function definitions.** Function names, descriptions, and parameter
+  types are read from the supplied JSON file instead of hardcoding rules for individual
+  functions. This allows the same selection pipeline to work with new function
+  definitions without modifying the source code.
+
+- **Combine full-sequence scoring with conditional capability reranking.** Scoring
+  complete function names avoids committing to an early greedy token choice. Capability
+  reranking is reserved for close candidates to balance selection quality and inference cost.
+
+- **Constrain argument generation to predefined candidates.** Prompt wording provides
+  semantic context, while token-level logit masking restricts argument values and regex
+  option codes to available candidates.
+
+- **Retain extraction context.** Previously extracted parameter values are included in the
+  prompt for subsequent parameters, helping the model distinguish between arguments without
+  preventing valid repeated values.
+
+- **Share prompt assembly across parameter types.** A single prompt builder handles number,
+  string, and boolean parameters, using type-specific instructions while sharing function
+  metadata, extracted values, chat roles, and JSON formatting.
+
+- **Expand the candidate pool before constraining selection.** Quoted strings and word n-grams
+  make multiword arguments available without assuming that every quoted phrase is the intended
+  value. Constrained decoding then selects from the constructed pool.
+
+- **Defer regex pattern extraction.** Recognized regex schemas extract the source string and
+  replacement first, allowing a specialized, bounded pattern-selection step to use those values
+  as context.
+
+- **Accumulate one complete result per request.** Parameter dictionaries are initialized
+  outside the inner parameter loop, so all extracted arguments are collected before constructing
+  a single `FunctionCallResult`.
+
+- **Report errors at the CLI boundary.** Lower-level functions propagate errors, while the CLI
+  handles them with descriptive messages and nonzero exit statuses.
 
 ## Challenges encountered
 
@@ -698,11 +747,6 @@ In case B, the combined space-plus-quote token can be `330`.
 The model is then evaluating different token continuations at different
 positions, so the logits are not directly interchangeable.
 
-Trailing whitespace cannot retroactively change logits that have already
-been computed. It can affect tokenization at a boundary, the allowed
-continuations, or when a candidate is considered complete. Investigating
-a changed answer requires the exact prompt and candidate token sequences.
-
 Whitespace also has a data-level meaning:
 
 | JSON text | Decoded value |
@@ -711,10 +755,10 @@ Whitespace also has a data-level meaning:
 | `"cat" ` | The same three-character value; the space is outside the string. |
 | `"cat "` | Four characters; the final space belongs to the argument. |
 
-The current argument path ends the JSON prefix at the colon and puts the
-space at the beginning of the serialized candidate. This convention improved
-the tested boundaries together with the fuller argument context. It is not
-a universal rule that adding a space produces the correct semantic answer.
+The current implementation ends the JSON prefix at the colon and prepends a 
+space to each serialized candidate. This keeps the tokenization convention 
+consistent during constrained decoding. Whitespace placement affects token 
+boundaries but does not guarantee semantically correct selection.
 
 ### A correct value must be present in the candidate pool
 
@@ -739,18 +783,16 @@ changing the model prompt.
 ### Multiword values needed both a larger pool and clearer instructions
 
 An earlier pool could offer only separate words for an unquoted full name.
-For `Greet Ceren Kurt`, selecting either `Ceren` or `Kurt` loses part of
+For `Greet Jane Doe`, selecting either `Jane` or `Doe` loses part of
 the requested value. Adding contiguous two- and three-word phrases makes
-`Ceren Kurt` available without manually encoding a specific person's name.
+`Jane Doe` available without manually encoding a specific person's name.
 
 Pool construction and prompting solve different parts of this problem.
 The shared builder's string instruction asks for the complete current
 argument and distinguishes it from the command. In
-`Greet Ceren Kurt using the word 'hello'`, both the name and the quoted
+`Greet Jane Doe using the word 'hello'`, both the name and the quoted
 word remain candidates; the function description and parameter name must
-guide the model to the name. A historical 35-request snapshot correctly
-extracted all nine greet examples and six echo examples, including an
-unquoted three-word value, an empty string, and Unicode.
+guide the model to the name.
 
 The current implementation deduplicates words, phrases, quoted spans,
 and punctuation-trimmed chunks. Unlike that earlier version, it does not
@@ -766,9 +808,9 @@ whose content was the wrong regex. For example, `[a-zA-Z]+` is a valid
 pattern but replaces whole letter sequences when the request asks only
 for vowels. Testing only `json.loads()` would miss that error.
 
-Playground checks therefore applied the selected pattern to source text:
+Extended checks therefore applied the selected pattern to source text:
 
-| Source | Pattern | Replacement | Expected diagnostic result |
+| Source | Pattern | Replacement | Expected substitution result |
 |---|---|---|---|
 | `Room 12` | `[0-9]+` | `X` | `Room X` |
 | `Programming is fun` | `[aeiouAEIOU]` | `*` | `Pr*gr*mm*ng *s f*n` |
@@ -789,33 +831,37 @@ addresses the supported cases while preserving quoted literal text.
 
 ### Numeric parsing improvements do not guarantee the chosen argument
 
-The old numeric pattern split `.5`, scientific notation, and comma-grouped
-numbers incorrectly. The updated extractor offers `0.5`, `1000.0`, and
-`1000.0` for `.5`, `1e3`, and `1,000`, respectively. A saved output file can
-still contain results from before the parser changed, so it must be
-distinguished from a fresh CLI run.
+The initial numeric pattern incorrectly split values such as `.5`, scientific 
+notation, and comma-grouped numbers. The updated extractor recognizes these 
+formats and converts `.5` to `0.5`, `1e3` to `1000.0`, and `1,000` to `1000.0`.
 
-For `Add 0.5 and -0.5.`, the current helper returns both signed values.
-If the model selects `0.5` for both parameters, the remaining error is in
-semantic selection, not a missing minus sign in the candidate pool. A fix
-must preserve valid repetitions such as `Add 7 and 7`; globally banning
-already-selected values would break that case.
+The extractor also preserves signed values, including both `0.5` and `-0.5` 
+in requests such as `Add 0.5 and -0.5.`. Previously selected values are not 
+removed from subsequent candidate pools, allowing valid repeated arguments 
+such as `Add 7 and 7.`.
 
-### Quoted text, apostrophes, and escape characters have different roles
+Numeric extraction and semantic selection remain separate responsibilities: 
+making a value available does not guarantee that the model will assign it to 
+the correct parameter.
 
-`Reverse 'hello world' please` contains one quoted argument with an internal
-space. Splitting only on spaces loses that grouping.
+### Quoted text, escape characters, and Unicode require careful handling
 
-There are also multiple interpretation layers:
+Natural-language requests may contain quoted strings, apostrophes, escaped 
+characters, and Unicode text. These must be handled carefully to preserve the 
+intended argument value.
 
-1. A Python source string may process escape sequences before a function
-   receives it.
-2. A JSON input file has its own string-escaping rules.
-3. A quote in the natural-language request can delimit an argument or be
-   part of its content.
-4. The output serializer must escape the resulting value correctly.
+For example, `Reverse 'hello world' please` contains a quoted argument with an 
+internal space. Splitting the request only on whitespace would lose that grouping.
 
-For example:
+String processing also involves several interpretation layers:
+
+1. **Python strings:** Escape sequences may be interpreted before a function receives a string.
+2. **JSON input:** Strings must follow JSON escaping rules, including escaped quotation marks and control characters.
+3. **Natural-language requests:** Quotes may delimit an argument or be part of its content.
+4. **JSON output:** Extracted values must be serialized without changing their intended meaning.
+
+For example, a newline character and the literal characters `\` and `n` are 
+different Python strings:
 
 ```python
 actual_newline = "\n"
@@ -825,107 +871,8 @@ assert len(actual_newline) == 1
 assert len(escaped_newline) == 2
 ```
 
-A literal newline inside a JSON string must be escaped. In the string-state
-experiments, a backslash followed by the letter `n` is handled differently
-from a raw control character. Inspecting `repr(text)` helped make the
-difference visible.
-
-The current splitters handle the tested quote forms; escaped delimiters
-and more ambiguous natural-language quoting still need broader coverage.
-
-### Schema validity and the intended meaning need different tests
-
-A value can have the correct type and still represent the wrong argument.
-
-During an early `Reverse the string 'hello'` experiment, the next-token
-scores after the opening quote were approximately:
-
-| Candidate token | Logit |
-|---|---:|
-| `string` | 25.0326 |
-| `hello` | 25.0196 |
-
-Both were allowed strings. Greedy selection picked `string` by a small
-margin. In the corresponding `world` request, `world` scored about 28.3006
-and `string` about 26.6283.
-
-Restricting a quoted single-argument request to its quoted candidate helped
-those examples, but excluded the actual name in requests such as
-`Greet Ceren using the word 'hello'`. The current implementation removed
-that shortcut, expanded the pool with n-grams, and strengthened the shared
-string instruction. Quoted text remains available alongside other values.
-
-The same distinction applies to booleans: `disabled: true` is validly
-typed but wrong for a request to enable notifications.
-
-### An extra function exposed weak selection prompting
-
-With only temperature and notification functions, the small test set selected
-the expected names. After `echo_text` was added, the plain selection prompt
-chose `echo_text` for all nine requests.
-
-Wrapping the same selection content in system and user messages followed
-by an open assistant prefix restored correct name selection in a diagnostic
-covering nine new requests and eleven original requests.
-
-The production function was then updated, and the complete additional
-test set was checked again. This was a prompt-format improvement; the
-token mask continued to enforce the available name candidates.
-
-### Extracted arguments must remain separate from parameter declarations
-
-The metadata `{"type": "number"}` describes what kind of value a parameter
-expects. An extracted value such as `2.0` is a separate piece of data.
-
-Similarly, printing `ParameterDefinition(type='number')` displays a nested
-Pydantic object's representation. The object has not become a string field.
-Its `.type` attribute accesses the declared type, and `model_dump()` creates
-a dictionary representation.
-
-Keeping those layers distinct prevented mistakes such as treating the
-parameter dictionary as a single parameter name or replacing a function
-definition's metadata with the extracted arguments.
-
-The word "model" also names two different concepts here: Pydantic models
-validate structured data, while `Small_LLM_Model` supplies tokenizer
-operations and next-token scores. Each function needs the appropriate kind
-of object for its responsibility.
-
-### Loop placement and mutation affected the whole output
-
-Several implementation details had visible consequences:
-
-- Printing a header inside a parameter loop repeated the header.
-- Returning from inside the first generation iteration stopped generation
-  after one token.
-- Creating a result inside the parameter loop produced separate result
-  objects for `a` and `b`.
-- `list.append()` modifies the existing list and returns `None`.
-- Both token histories must receive each selected ID, while candidate
-  matching uses only the generated prefix.
-
-The final structure collects all parameters before appending one result
-for a request.
-
-### A tuple of messages is not one model-input string
-
-This return value contains three separate strings in a tuple:
-
-```python
-return system_message, user_message, open_assistant_start
-```
-
-The SDK expects one input string. Passing the tuple during development
-produced a tensor-shape error referring to inconsistent sequence lengths.
-Concatenating the message strings before returning them fixed the mismatch.
-
-A `-> str` annotation describes the intended contract; it does not convert
-an incorrect return value at runtime. Mypy provides an earlier check of
-that contract.
-
-### Unicode escapes can preserve the original text
-
-This JSON representation:
+Unicode characters introduce another representation distinction. For example, 
+the JSON string:
 
 ```json
 {
@@ -933,18 +880,49 @@ This JSON representation:
 }
 ```
 
-decodes to:
+decodes to the same text as:
 
 ```text
 Çağrı 🌡️
 ```
 
-The verified comparison used `json.load()`/`json.loads()` and the actual
-decoded value. Python's JSON writer uses ASCII escaping by default.
-The current writer uses `ensure_ascii=False` and UTF-8 so literal Unicode
-characters remain readable in the file. This changes presentation rather
-than the decoded value.
-See the [Python JSON documentation](https://docs.python.org/3/library/json.html).
+The output writer uses UTF-8 encoding and `ensure_ascii=False` so Unicode characters 
+remain readable in the generated JSON file. Escaped and literal Unicode representations 
+may look different in the file while decoding to the same string value.
+
+During development, inspecting `repr()` and testing JSON round trips with `json.loads()` 
+helped distinguish actual string contents from their serialized representations.
+
+The current string extractors handle the tested quoting cases, but escaped quote delimiters 
+and ambiguous natural-language quoting remain areas where broader coverage is needed.
+
+### Schema validity and the intended meaning need different checks
+
+A generated argument can have the correct JSON type while still representing 
+the wrong value. For example, selecting `"string"` instead of `"hello"` for 
+`Reverse the string 'hello'` produces a valid string argument but does not 
+satisfy the request.
+
+Similarly, `disabled: true` is structurally valid for a boolean parameter but 
+contradicts an instruction to enable notifications.
+
+Constrained decoding guarantees candidate membership when generation succeeds, 
+while Pydantic and the parameter checker validate structure and types. Semantic 
+correctness requires a separate comparison against the intended function call.
+
+### Function selection was sensitive to prompt structure
+
+During development, adding another function definition exposed incorrect 
+function-name selections. The model's ranking changed significantly depending 
+on how function metadata and the user request were formatted.
+
+Using explicit system and user message boundaries, followed by the model's 
+expected open assistant prefix, improved selection behavior in targeted diagnostics.
+
+This demonstrated that model scores depend not only on the candidate function 
+names but also on the surrounding prompt context. The final hybrid selector retains 
+structured prompting while evaluating complete function-name continuations and 
+conditionally reranking close candidates.
 
 ### Exceptions belong at the right boundary
 
@@ -956,6 +934,10 @@ A lower-level `except` block that only re-raises the same error adds no
 new handling. The CLI provides context and an exit status for handled
 failures. Stopping after a failed generation also avoids continuing with
 a result variable that was never assigned.
+
+Result serialization is completed before output directories are created or 
+files are opened, preventing serialization failures from modifying existing 
+output files.
 
 ## Testing strategy
 
@@ -972,7 +954,7 @@ all 11 expected calls. The local combined report was independently
 recounted: its actual-versus-expected records confirm 71/76 complete calls,
 73/76 correct names, and one error. The full 31-case report is not present
 in the current workspace; its 19/31 figure and six errors remain a
-historical reported result rather than a newly audited measurement.
+historically reported result rather than a newly audited measurement.
 
 | Test set | Available functions | Prompts | Fully correct | Accuracy | What this measures |
 |---|---:|---:|---:|---:|---|
@@ -996,7 +978,7 @@ accuracy does not supersede the independent generalization result of 61.3%.
 
 | Case | Observed behavior | Classification |
 |---|---|---|
-| `OLD-34` | `Greet the person by name and surname: Ceren Kurt` returned only `Ceren` | Incomplete multiword string extraction |
+| `OLD-34` | `Greet the person by name and surname: Jane Doe` returned only `Jane` | Incomplete multiword string extraction |
 | `NEW-10` | Reminder request could not obtain required `hour` for an incorrectly selected alarm function | Function selection and subsequent missing-candidate error |
 | `NEW-16`, `NEW-17` | Discount requests selected regex substitution instead | Candidate-set sensitivity / incorrect function selection |
 | `NEW-28` | `unmute it` yielded `muted: true` instead of `false` | Boolean semantic interpretation |
@@ -1073,12 +1055,6 @@ uv run python -m src --functions_definition /tmp/cmm_bad.json
 
 This should report a JSON parse error and exit nonzero without starting the model.
 
-### Historical development checkpoints
-
-Earlier implementation-stage results and tokenizer/debugging experiments are
-preserved in [Challenges encountered](#challenges-encountered). They are historical
-snapshots rather than the latest end-to-end benchmark.
-
 ## Performance analysis
 
 Previously recorded cached-model timings on the development machine:
@@ -1130,12 +1106,12 @@ functions and inference time.
 2. **Total log-probability is length-sensitive.** Scores are summed across
    name tokens, which may favor shorter candidate token sequences. This
    may contribute to some rankings, but the specific failures above were
-   not proved to be caused by name length.
+   not proven to be caused by name length.
 3. **String candidate coverage and selection are imperfect.** The pool
    supports quoted spans, individual chunks, two- and three-word n-grams,
    and punctuation-trimmed chunks. It does not append the full request
    as a fallback. The correct value can still lose to an incomplete
-   candidate (`OLD-34`: `Ceren` instead of `Ceren Kurt`). Ambiguous
+   candidate (`OLD-34`: `Jane` instead of `Jane Doe`). Ambiguous
    apostrophes, escaped delimiters, and some empty-string instructions
    also remain challenging.
 4. **Boolean polarity is not always inferred correctly.** Negated or
@@ -1210,11 +1186,7 @@ in these areas:
   sequential argument extraction, and the regex special case.
 - **Tests and debugging:** Designing normal and edge-case prompts,
   generating independent expected results, analyzing wrong function
-  choices and argument values, reviewing error handling and lint issues.
+  choices and argument values.
 - **Documentation:** Reviewing README completeness against the project
-  subject, planning the FigJam architecture diagram, and preparing
-  evaluation-friendly descriptions of trade-offs and known limitations.
-
-AI suggestions and generated test material were treated as proposals to
-inspect and verify, not as evidence of correctness. The author remains
-responsible for understanding, reviewing, and maintaining the submitted code.
+  subject, preparing evaluation-friendly descriptions of trade-offs and
+  known limitations.

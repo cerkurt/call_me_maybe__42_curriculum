@@ -7,6 +7,7 @@ These helpers do not execute the requested text replacement.
 """
 
 from llm_sdk import Small_LLM_Model
+
 from . import parameter_extractors, llm_helpers
 
 import re
@@ -81,11 +82,11 @@ def generate_regex_pattern(
 
     candidates = regex_candidate_generator(user_request, source_string)
 
-    pattern_label_codes: dict = {}
+    pattern_label_codes: dict[str, str] = {}
     for index, label in enumerate(candidates):
         pattern_label_codes[chr(65 + index)] = label
 
-    encoded_labels: dict = {}
+    encoded_labels: dict[str, list[int]] = {}
     for label, title in pattern_label_codes.items():
         encoded_labels[label] = model_object.encode(label)[0].tolist()
 

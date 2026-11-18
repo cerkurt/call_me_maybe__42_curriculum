@@ -6,6 +6,7 @@ These helpers select a name without extracting or executing arguments.
 """
 
 from llm_sdk import Small_LLM_Model
+
 from . import data_models, llm_helpers
 
 
@@ -27,7 +28,7 @@ def build_function_selector_prompt(
 
     This function prepares text only; it does not call the model.
     """
-    available_functions: list = []
+    available_functions: list[str] = []
     for function in validated_functions:
         parameters = ", ".join(
             f"{name}: {definition.type}"
@@ -150,7 +151,7 @@ def hybrid_function_selector(
     name does not guarantee that its meaning matches every request.
     """
     if not functions:
-        raise ValueError("No available functions.")
+        raise ValueError("No available functions to select.")
 
     selection_prompt = build_function_selector_prompt(user_request, functions)
 

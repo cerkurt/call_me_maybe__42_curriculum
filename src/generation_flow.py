@@ -6,6 +6,7 @@ responsibility of the caller.
 """
 
 from llm_sdk import Small_LLM_Model
+
 from . import (
     data_models,
     llm_helpers,
@@ -53,7 +54,7 @@ def progress_builder(
     An empty prompt list returns an empty list. The function performs no file
     I/O and does not execute the selected application functions.
     """
-    list_to_write: list = []
+    list_to_write: list[data_models.FunctionCallResult] = []
 
     for prompt in validated_prompt_list:
         user_request = prompt.prompt
@@ -75,7 +76,7 @@ def progress_builder(
                     for field in regex_fields
                 )
 
-                parameter_dict: dict = {}
+                parameter_dict: dict[str, object] = {}
                 for (
                     parameter_name,
                     parameter_type,
@@ -119,7 +120,7 @@ def progress_builder(
                         )
                     )
 
-                    json_and_id_match_dict: dict = {}
+                    json_and_id_match_dict: dict[str, list[int]] = {}
                     for candidate in candidates:
                         json_text = " " + json.dumps(
                             candidate, ensure_ascii=False

@@ -27,8 +27,8 @@ def string_splitter_out_of_quotes(text: str) -> list[str]:
     Only literal spaces separate chunks here. This is a lightweight request
     splitter, not a general parser for escaped or nested quote delimiters.
     """
-    completed_parts: list = []
-    current_part: list = []
+    completed_parts: list[str] = []
+    current_part: list[str] = []
     is_quote_active = None
 
     for char in text:
@@ -65,8 +65,8 @@ def string_splitter_inside_the_quotes(text: str) -> list[str]:
     A matching quote closes the current span. Backslash escapes are not
     interpreted, so this is not a full parser for arbitrary quoted syntax.
     """
-    completed_parts: list = []
-    current_part: list = []
+    completed_parts: list[str] = []
+    current_part: list[str] = []
     is_quote_active = None
 
     for index, char in enumerate(text):
@@ -108,7 +108,7 @@ def string_slicer(user_request: str) -> list[str]:
     )
     out_of_the_quotes_substrings = string_splitter_out_of_quotes(user_request)
 
-    word_filter_list: list = []
+    word_filter_list: list[str] = []
     for word in out_of_the_quotes_substrings:
         if len(word) >= 2 and (
             (word[0] == "'" and word[len(word) - 1] == "'")
@@ -134,7 +134,6 @@ def string_slicer(user_request: str) -> list[str]:
                 if candidate != user_request:
                     word_filter_list.append(candidate)
 
-    # word_filter_list.append(user_request)
     for word in out_of_the_quotes_substrings:
         clean_word = word.rstrip(".!?")
         if clean_word != word and clean_word:
@@ -194,7 +193,7 @@ def message_for_parameter_extraction(
     user_request: str,
     function_object: data_models.FunctionDefinition,
     given_parameter_name: str,
-    extracted_parameters: dict,
+    extracted_parameters: dict[str, object],
 ) -> str:
     """Format the shared extraction prompt and open JSON argument prefix.
 

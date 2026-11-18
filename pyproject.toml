@@ -13,6 +13,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy>=2.4.0",
+    "pytest>=9.2.0",
 ]
 
 [tool.uv.workspace]
@@ -25,9 +26,19 @@ llm-sdk = { workspace = true }
 
 
 [tool.mypy]
-exclude = ['(^|/)([.]venv|llm_sdk)/']
+exclude = ['(^|/)([.]venv|llm_sdk|tests)/']
 mypy_path = ["llm_sdk"]
 
 [[tool.mypy.overrides]]
 module = ["llm_sdk.*"]
 follow_imports = "silent"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "helpers: fast deterministic extraction and token tests",
+    "io: input/output, schema, and CLI error-boundary tests",
+    "llm: opt-in real model inference (slow, cached weights required)",
+]

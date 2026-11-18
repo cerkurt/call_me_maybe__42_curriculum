@@ -5,13 +5,45 @@ model, generate structured calls, and write the resulting JSON array.
 This module calls main() when loaded.
 """
 
+from llm_sdk import Small_LLM_Model
+from pydantic import ValidationError
+from pathlib import Path
+
+from . import data_io, data_models, generation_flow
+
 import argparse
 import sys
 import json
-from pydantic import ValidationError
+import traceback
 
-from . import data_io, data_models, generation_flow
-from llm_sdk import Small_LLM_Model
+
+class C:
+    """ANSI color codes used to make terminal output easier to read."""
+
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    RED = "\033[31m"
+    PURPLE = "\033[35m"
+    BG_RED = "\033[41m"
+
+
+def get_error_location(error: BaseException) -> str:
+    """Return the source file, function, and line of an exception."""
+    locations = traceback.extract_tb(error.__traceback__)
+
+    if not locations:
+        return "Unknown location"
+
+    last_location = locations[-1]
+    file_name = Path(last_location.filename).name
+
+    return (
+        f"{C.YELLOW}File name:{C.RESET} {file_name}\n"
+        f"{C.YELLOW}Function (location) name:{C.RESET} "
+        f"{last_location.name}():\n"
+    )
 
 
 def main() -> None:
@@ -48,103 +80,64 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    flow_state = "loading function definitions"
+
     try:
         valid_function_list = data_io.model_validation(
             args.functions_definition, data_models.FunctionDefinition
         )
-    except FileNotFoundError as e:
-        print(
-            f"[{type(e).__name__}] File ({e.filename}) not "
-            f"found in given path. "
-            f"Check the file path and/or file name."
-        )
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(
-            f"[{type(e).__name__}] Invalid JSON at line {e.lineno}, "
-            f"column {e.colno}: {e.msg}"
-        )
-        sys.exit(1)
-    except ValidationError as e:
-        print(
-            f"[{type(e).__name__}] Input validation failed. "
-            f"Check the reported fields: {e}"
-        )
-        sys.exit(1)
-    except ValueError as e:
-        print(f"[{type(e).__name__}] Invalid input data at: {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[{type(e).__name__}] {e}")
-        sys.exit(1)
 
-    try:
+        flow_state = "loading user prompts"
         valid_prompt_list = data_io.model_validation(
             args.input, data_models.PromptTest
         )
-    except FileNotFoundError as e:
-        print(
-            f"[{type(e).__name__}] File ({e.filename}) not "
-            f"found in given path. "
-            f"Check the file path and/or file name."
-        )
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(
-            f"[{type(e).__name__}] Invalid JSON at line {e.lineno}, "
-            f"column {e.colno}: {e.msg}"
-        )
-        sys.exit(1)
-    except ValidationError as e:
-        print(
-            f"[{type(e).__name__}] Input validation failed. "
-            f"Check the reported fields: {e}"
-        )
-        sys.exit(1)
-    except ValueError as e:
-        print(f"[{type(e).__name__}] Invalid input data at: {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[{type(e).__name__}] {e}")
-        sys.exit(1)
 
-    try:
+        flow_state = "initializing the LLM"
         model_object = Small_LLM_Model()
-    except ValueError as e:
-        print(
-            f"[{type(e).__name__}] Error generating model object in main. {e}"
-        )
-        sys.exit(1)
-    except OSError as e:
-        print(
-            f"[{(type(e).__name__)}] Error with operating system during "
-            f"generating model object in main. {e}"
-        )
-        sys.exit(1)
 
-    try:
+        flow_state = "generating function calls"
         model_generation_result = generation_flow.progress_builder(
-            model_object, valid_function_list, valid_prompt_list
+            model_object,
+            valid_function_list,
+            valid_prompt_list,
         )
-    except ValueError as e:
-        print(f"[{type(e).__name__}] Error during model progress flow. {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[{type(e).__name__}] Error during model progress flow. {e}")
-        sys.exit(1)
 
-    try:
+        flow_state = "writing JSON results"
         data_io.write_results(args.output, model_generation_result)
-    except (ValueError, TypeError) as e:
+
+    except Exception as e:
+        error_location = get_error_location(e)
+
+        if isinstance(e, FileNotFoundError):
+            error_message = f"File not found: {C.RED}{e.filename}{C.RESET}"
+
+        elif isinstance(e, json.JSONDecodeError):
+            error_message = (
+                f"Invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}"
+            )
+
+        elif isinstance(e, ValidationError):
+            error_message = f"Input validation failed: {e}"
+
+        elif isinstance(e, ValueError):
+            error_message = str(e)
+
+        elif isinstance(e, TypeError):
+            error_message = f"Invalid data type: {e}"
+
+        elif isinstance(e, OSError):
+            error_message = f"File or operating system error: {e}"
+
+        else:
+            error_message = f"Unexpected error: {e}"
+            traceback.print_exception(e)
+
         print(
-            f"[{type(e).__name__}] Error during JSON conversion at "
-            f"{args.output}. {e}"
-        )
-        sys.exit(1)
-    except OSError as e:
-        print(
-            f"[{type(e).__name__}] Error during output writing at "
-            f"{args.output}. {e}"
+            f"{C.BG_RED}[{type(e).__name__}]{C.RESET} "
+            f"During {flow_state}, in:\n"
+            f"{error_location}"
+            f"{C.YELLOW}Error message:{C.RESET} {error_message}",
+            file=sys.stderr,
         )
         sys.exit(1)
 
