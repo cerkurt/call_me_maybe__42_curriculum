@@ -31,7 +31,7 @@ lint-strict:
 .PHONY: test-errors test-21 test-42 compare-21 compare-42
 
 test-errors:
-	@/usr/bin/time -p uv run python test_suite/run_error_cases.py
+	@/usr/bin/time -p uv run python -m test_suite.run_error_cases
 
 test-21:
 	@/usr/bin/time -p uv run python -m src \
@@ -46,12 +46,12 @@ test-42:
 		--output data/output/results_42.json
 
 compare-21:
-	uv run python test_suite/compare_results.py \
+	uv run python -m test_suite.compare_results \
 		--expected test_suite/02_prompts_21/expected.json \
 		--actual data/output/results_21.json
 
 compare-42:
-	uv run python test_suite/compare_results.py \
+	uv run python -m test_suite.compare_results \
 		--expected test_suite/03_prompts_42/expected.json \
 		--actual data/output/results_42.json
 
