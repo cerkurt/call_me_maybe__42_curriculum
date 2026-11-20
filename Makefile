@@ -6,7 +6,10 @@ install:
 	uv sync
 
 run:
-	@/usr/bin/time -p uv run python -m src
+	@/usr/bin/time -p sh -c 'uv run python -m src; \
+	status=$$?; \
+	printf "\nExecution time results:\n" >&2; \
+	exit $$status'
 
 debug:
 	uv run python -m pdb -m src
@@ -51,3 +54,26 @@ compare-42:
 	uv run python test_suite/compare_results.py \
 		--expected test_suite/03_prompts_42/expected.json \
 		--actual data/output/results_42.json
+
+# Run the private moulinette workflow from the project root.
+.PHONY: moulinette-prepare moulinette-run moulinette-grade test-moulinette
+
+moulinette-prepare:
+	cd moulinette && uv sync
+	cd moulinette && uv run python -m moulinette prepare_exercises --set private
+
+moulinette-run:
+	@/usr/bin/time -p uv run python -m src \
+		--functions_definition moulinette/data/input/functions_definition.json \
+		--input moulinette/data/input/function_calling_tests.json \
+		--output data/output/moulinette_results.json
+
+moulinette-grade:
+	cd moulinette && uv run python -m moulinette grade_student_answers \
+		--set private \
+		--student_answer_path ../data/output/moulinette_results.json
+
+test-moulinette:
+	$(MAKE) moulinette-prepare
+	$(MAKE) moulinette-run
+	$(MAKE) moulinette-grade

@@ -48,6 +48,7 @@ def regex_candidate_generator(
 
     for string_literal in literals:
         if string_literal in source_string and string_literal != source_string:
+            # Escape metacharacters: a literal 'a.b' must not match 'aXb'.
             available_patterns[f"literal: {string_literal}"] = re.escape(
                 string_literal
             )
@@ -83,11 +84,13 @@ def generate_regex_pattern(
     candidates = regex_candidate_generator(user_request, source_string)
 
     pattern_label_codes: dict[str, str] = {}
+    # Keep short answer codes separate from labels and their actual regexes.
     for index, label in enumerate(candidates):
         pattern_label_codes[chr(65 + index)] = label
 
     encoded_labels: dict[str, list[int]] = {}
     for label, title in pattern_label_codes.items():
+        # Encode the option code, since that is what the model must return.
         encoded_labels[label] = model_object.encode(label)[0].tolist()
 
     readable_options = ""
@@ -118,6 +121,7 @@ def generate_regex_pattern(
         model_object, selection_message, encoded_labels, 10
     )
 
+    # Resolve both mappings: selected code -> readable label -> regex pattern.
     selected_label = pattern_label_codes[selected_candidate]
     selected_pattern = candidates[selected_label]
 
@@ -155,10 +159,12 @@ def convert_regex_replacement_value(
         user_request
     )
 
+    # Stop one position early because each iteration also reads index + 1.
     for index in range((len(substrings) - 1)):
         current_piece = substrings[index]
         next_piece = substrings[index + 1]
         if current_piece.lower() == "with":
+            # Quotes remain in the chunk, so 'asterisks' stays literal text.
             symbol_name = next_piece.rstrip(".,!?;:").lower()
             if (
                 symbol_name == replacement.lower()
@@ -166,4 +172,5 @@ def convert_regex_replacement_value(
             ):
                 return char_name_dict[symbol_name]
 
+    # Preserve extracted values that do not match the supported symbol rule.
     return replacement

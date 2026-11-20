@@ -46,6 +46,7 @@ def compare_results() -> None:
             print("FAIL")
             print("Expected:", expected_result)
             print("Actual:  ", actual[index])
+
         else:
             print("PASS")
             correct_count += 1
@@ -58,13 +59,13 @@ def compare_results() -> None:
     extra_count = max(0, len(actual) - len(expected))
 
     print(f"\n{C.BLUE}===== Summary ====={C.RESET}")
-    print(f"Correct: {correct_count}/{len(expected)}")
-    print(f"Missing results: {missing_count}")
+    print(f"{C.GREEN}Correct:{C.RESET} {correct_count}/{len(expected)}")
+    print(f"{C.RED}Missing results:{C.RESET} {missing_count}")
     print(f"Extra results: {extra_count}")
 
     if expected:
         accuracy = correct_count / len(expected) * 100
-        print(f"Accuracy: {accuracy:.1f}%")
+        print(f"Accuracy: {accuracy:.1f}%\n")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ def string_splitter_out_of_quotes(text: str) -> list[str]:
     is_quote_active = None
 
     for char in text:
+        # Remember the opening quote so only the matching kind closes it.
         if is_quote_active is None:
             if char in ("'", '"') and not current_part:
                 is_quote_active = char
@@ -39,12 +40,14 @@ def string_splitter_out_of_quotes(text: str) -> list[str]:
             is_quote_active = None
 
         if char == " " and is_quote_active is None:
+            # A space ends a chunk only when it is outside a quoted region.
             if current_part:
                 completed_parts.append("".join(current_part))
                 current_part = []
         else:
             current_part.append(char)
 
+    # The last chunk has no following separator to flush it inside the loop.
     if current_part:
         completed_parts.append("".join(current_part))
 
@@ -71,11 +74,13 @@ def string_splitter_inside_the_quotes(text: str) -> list[str]:
 
     for index, char in enumerate(text):
         if is_quote_active is None:
+            # Avoid treating a word's internal apostrophe as an opening quote.
             if char in ("'", '"') and not (
                 char == "'" and index > 0 and text[index - 1].isalnum()
             ):
                 is_quote_active = char
         elif char == is_quote_active:
+            # Save even empty quoted values; quote delimiters are not included.
             completed_parts.append("".join(current_part))
             current_part = []
             is_quote_active = None
@@ -110,6 +115,7 @@ def string_slicer(user_request: str) -> list[str]:
 
     word_filter_list: list[str] = []
     for word in out_of_the_quotes_substrings:
+        # Remove matching outer quotes while preserving the enclosed value.
         if len(word) >= 2 and (
             (word[0] == "'" and word[len(word) - 1] == "'")
             or (word[0] == '"' and word[len(word) - 1] == '"')
@@ -119,15 +125,21 @@ def string_slicer(user_request: str) -> list[str]:
         else:
             word_filter_list.append(word)
 
+    # Split the request around single- or double-quoted strings,
+    # keeping the quoted parts as separate elements in the result.
+    # The negative lookbehind prevents matching quotes directly
+    # preceded by a word character.
     segments = re.split(
         r"""(?<!\w)('[^']*'|"[^"]*")""",
         user_request,
     )
 
     for segment in segments[::2]:
+        # Even positions are unquoted text; build phrases within each one.
         words = segment.split()
 
         for size in (2, 3):
+            # Slide a two- or three-word window through every valid start.
             for start in range(len(words) - size + 1):
                 candidate = " ".join(words[start : start + size])
 
@@ -135,12 +147,25 @@ def string_slicer(user_request: str) -> list[str]:
                     word_filter_list.append(candidate)
 
     for word in out_of_the_quotes_substrings:
+        # Add a clean alternative, but keep the original candidate as well.
         clean_word = word.rstrip(".!?")
         if clean_word != word and clean_word:
             word_filter_list.append(clean_word)
 
     word_filter_list.extend(inside_the_quotes_substrings)
 
+    word_matches = list(re.finditer(r"\S+", user_request))
+
+    for start in range(len(word_matches)):
+        for end in range(start, len(word_matches)):
+            candidate = user_request[
+                word_matches[start].start() : word_matches[end].end()
+            ]
+
+            if candidate != user_request:
+                word_filter_list.append(candidate)
+
+    # Remove repeated candidates while preserving their first-seen order.
     return list(dict.fromkeys(word_filter_list))
 
 
@@ -163,11 +188,21 @@ def extract_numbers_from_user_request(user_request: str) -> list[float]:
     This helper extracts candidates, not their parameter assignments. Float
     conversion has the usual precision and range limits.
     """
+    # Match a sign, number, and optional exponent as one complete candidate.
+    # Boundary checks prevent matches starting or ending inside word tokens.
+
     number_pattern = (
+        # Reject matches preceded by a word character or a decimal point.
         r"(?<![\w.])"
+        # Allow an optional negative (-) or positive (+) sign.
         r"[-+]?"
+        # Match either a number with an integer part (optionally followed
+        # by decimals), or a decimal starting directly with a dot (.5).
+        # The integer part supports both plain digits and comma grouping.
         r"(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+        # Allow optional scientific notation, such as 1e3 or 2.5E-4.
         r"(?:[eE][+-]?\d+)?"
+        # Reject matches immediately followed by a word character.
         r"(?!\w)"
     )
 
@@ -176,6 +211,7 @@ def extract_numbers_from_user_request(user_request: str) -> list[float]:
     float_list: list[float] = []
 
     for number in numbers_in_string:
+        # Grouping commas describe the number but are not accepted by float().
         float_conversion = float(number.replace(",", ""))
 
         if math.isfinite(float_conversion):
@@ -219,23 +255,15 @@ def message_for_parameter_extraction(
 
     if parameter_type == "string":
         system_instruction = (
-            "Extract the value of the current parameter from the user's "
-            "request. Use the function description and parameter name to "
-            "determine which part of the request supplies that value. "
-            "Distinguish the requested action from its argument. "
-            "Do not return the command itself unless it is explicitly the "
-            "requested argument value. "
-            "Preserve the complete value exactly, including empty strings, "
-            "spaces, punctuation, and Unicode characters. "
-            "Quoted text may be an argument, but is not automatically the "
-            "value of every parameter. "
-            "If the request mentions both the target of an action and "
-            "additional words describing how to perform that action, "
-            "identify which one corresponds to the current parameter. "
-            "For a parameter referring to the recipient or target, "
-            "extract that recipient or target, not the words describing "
-            "how the action should be performed. "
-            "Return a JSON object. Do not execute the function."
+            "Extract the input value for the current function parameter. "
+            "Return a JSON object; do not execute the function. "
+            "Use the parameter name and function description to identify the "
+            "value. Exclude command words, field labels, and words naming the "
+            "resource type. Preserve the entire value exactly, including "
+            "internal quotes, spaces, punctuation, placeholders, and Unicode. "
+            "A label introducing a value is not part of the value. "
+            "For example, 'Connect to the staging service' supplies the "
+            " service name 'staging', not 'staging service'."
         )
     else:
         system_instruction = (
@@ -276,7 +304,10 @@ def message_for_parameter_extraction(
             "Do not choose the value based on isolated action words."
         )
 
-    if function_object.parameters[given_parameter_name].type == "number":
+    if function_object.parameters[given_parameter_name].type in (
+        "number",
+        "integer",
+    ):
         message += (
             "\nIdentify the number corresponding to the current parameter "
             "using its name and the user's request. "
@@ -287,16 +318,20 @@ def message_for_parameter_extraction(
 
     user_message = llm_helpers.format_request_message("user", message)
 
+    # Use JSON serialization so quotes, booleans, and values have JSON syntax.
     json_text = json.dumps(
         extracted_parameters,
         ensure_ascii=False,
     )
+    # Remove only the closing brace to continue the object with the next key.
     dictionary_prepare = json_text[:-1]
     json_key = json.dumps(given_parameter_name)
     if len(extracted_parameters) != 0:
+        # The next key needs a comma only when earlier arguments already exist.
         dictionary_prepare = dictionary_prepare + ","
     dictionary_prepare = dictionary_prepare + " " + f"{json_key}:"
 
+    # Candidate values supply the leading space after this unfinished colon.
     open_assistant_start = (
         "<|im_start|>assistant\n<think>\n\n</think>\n\n" + dictionary_prepare
     )

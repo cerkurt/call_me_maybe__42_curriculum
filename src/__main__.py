@@ -36,6 +36,7 @@ def get_error_location(error: BaseException) -> str:
     if not locations:
         return "Unknown location"
 
+    # The last traceback frame is where the exception was originally raised.
     last_location = locations[-1]
     file_name = Path(last_location.filename).name
 
@@ -43,6 +44,23 @@ def get_error_location(error: BaseException) -> str:
         f"{C.YELLOW}File name:{C.RESET} {file_name}\n"
         f"{C.YELLOW}Function (location) name:{C.RESET} "
         f"{last_location.name}():\n"
+    )
+
+
+def print_status(message: str, success: bool = False) -> None:
+    """Display an informational or success message immediately."""
+    if success:
+        label = f"{C.GREEN}[OK]{C.RESET}"
+    else:
+        label = f"{C.YELLOW}[INFO]{C.RESET}"
+
+    # Print the status message to stderr, keeping it separate from standard
+    # output. flush=True ensures the message is displayed immediately without
+    # waiting for the output buffer to fill.
+    print(
+        f"{label} {message}",
+        file=sys.stderr,
+        flush=True,
     )
 
 
@@ -78,24 +96,32 @@ def main() -> None:
         help="Definition of functions to be used during function calling.",
     )
 
+    # Explicit CLI paths override defaults; omitted options keep defaults.
     args = parser.parse_args()
 
+    # Update this before each stage so one handler can report what failed.
     flow_state = "loading function definitions"
 
     try:
+        # Validate both files before spending time initializing the model.
+        print_status("Loading and validating function definitions...")
         valid_function_list = data_io.model_validation(
             args.functions_definition, data_models.FunctionDefinition
         )
 
         flow_state = "loading user prompts"
+        print_status("Loading and validating user prompts...")
         valid_prompt_list = data_io.model_validation(
             args.input, data_models.PromptTest
         )
 
         flow_state = "initializing the LLM"
+        # This single object is reused for every prompt in the current run.
+        print_status("Initializing language model...")
         model_object = Small_LLM_Model()
 
         flow_state = "generating function calls"
+        print_status("Generating function calls...")
         model_generation_result = generation_flow.progress_builder(
             model_object,
             valid_function_list,
@@ -103,7 +129,11 @@ def main() -> None:
         )
 
         flow_state = "writing JSON results"
+        # Write only after generation returns the complete batch of results.
+        print_status("Writing JSON results...")
         data_io.write_results(args.output, model_generation_result)
+
+        print_status("Completed successfully!", success=True)
 
     except Exception as e:
         error_location = get_error_location(e)
@@ -111,6 +141,7 @@ def main() -> None:
         if isinstance(e, FileNotFoundError):
             error_message = f"File not found: {C.RED}{e.filename}{C.RESET}"
 
+        # Check Decode/Pydantic errors before their ValueError parent class.
         elif isinstance(e, json.JSONDecodeError):
             error_message = (
                 f"Invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}"
@@ -139,6 +170,7 @@ def main() -> None:
             f"{C.YELLOW}Error message:{C.RESET} {error_message}",
             file=sys.stderr,
         )
+        # Tell the shell and Make that this run did not complete successfully.
         sys.exit(1)
 
 

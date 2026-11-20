@@ -57,6 +57,7 @@ def progress_builder(
     list_to_write: list[data_models.FunctionCallResult] = []
 
     for prompt in validated_prompt_list:
+        # Keep the original request for extraction and the final output record.
         user_request = prompt.prompt
 
         result_function_name = function_selectors.hybrid_function_selector(
@@ -67,6 +68,7 @@ def progress_builder(
 
         for function in validated_function_list:
             if function.name == result_function_name:
+                # Recognize the special regex schema by its fields and types.
                 regex_fields = {"source_string", "regex", "replacement"}
 
                 is_regex_function = regex_fields.issubset(
@@ -76,14 +78,19 @@ def progress_builder(
                     for field in regex_fields
                 )
 
+                # Start fresh per prompt; later arguments see earlier values.
                 parameter_dict: dict[str, object] = {}
                 for (
                     parameter_name,
                     parameter_type,
                 ) in function.parameters.items():
-                    candidates: list[float] | list[str] | list[bool]
+                    candidates: (
+                        list[float] | list[int] | list[str] | list[bool]
+                    )
 
                     if is_regex_function and parameter_name == "regex":
+                        # A pattern may not occur literally in the request.
+                        # Select it later, with source/replacement as context.
                         continue
 
                     if parameter_type.type == "number":
@@ -99,6 +106,23 @@ def progress_builder(
                                 f"{user_request}"
                             )
 
+                    elif parameter_type.type == "integer":
+                        numbers = param_ext.extract_numbers_from_user_request(
+                            user_request
+                        )
+
+                        candidates = [
+                            int(number)
+                            for number in numbers
+                            if number.is_integer()
+                        ]
+
+                        if not candidates:
+                            raise ValueError(
+                                f"No integer candidates found for "
+                                f"parameter {parameter_name!r}."
+                            )
+
                     elif parameter_type.type == "string":
                         candidates = param_ext.string_slicer(user_request)
 
@@ -111,6 +135,7 @@ def progress_builder(
                             f"'{parameter_name}' as '{parameter_type.type}'"
                         )
 
+                    # Include the current key and the values extracted so far.
                     model_input_text = (
                         param_ext.message_for_parameter_extraction(
                             user_request,
@@ -122,6 +147,8 @@ def progress_builder(
 
                     json_and_id_match_dict: dict[str, list[int]] = {}
                     for candidate in candidates:
+                        # Continue the prompt's ':' with a leading space.
+                        # JSON serialization preserves the candidate's type.
                         json_text = " " + json.dumps(
                             candidate, ensure_ascii=False
                         )
@@ -135,10 +162,12 @@ def progress_builder(
                         50,
                     )
 
+                    # Parse the selected JSON text back into a Python value.
                     parameter_value = json.loads(result)
                     parameter_dict[parameter_name] = parameter_value
 
                 if is_regex_function:
+                    # Finish regex-specific values after ordinary extraction.
                     source_string_value = parameter_dict["source_string"]
                     replacement_value = parameter_dict["replacement"]
 
@@ -165,8 +194,10 @@ def progress_builder(
                     )
                     parameter_dict["regex"] = new_regex
 
+                # Check the complete argument dictionary before collecting it.
                 data_models.parameter_type_checker(function, parameter_dict)
 
+                # Restore schema order because regex was inserted separately.
                 parameter_dict = {
                     parameter_name: parameter_dict[parameter_name]
                     for parameter_name in function.parameters
@@ -176,7 +207,9 @@ def progress_builder(
                     name=function.name,
                     parameters=parameter_dict,
                 )
+                # Collect one result per prompt, not one result per parameter.
                 list_to_write.append(new_function_object)
+                # This definition is done; stop searching other functions.
                 break
 
     return list_to_write

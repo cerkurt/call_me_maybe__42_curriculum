@@ -12,6 +12,7 @@ from . import data_models
 
 import json
 
+# Keep the returned list's model type tied to the class supplied by the caller.
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
@@ -46,6 +47,7 @@ def load_json_file(path: str) -> list[object]:
     with open(path, "r", encoding="utf-8") as file_to_load:
         loaded_file = json.load(file_to_load)
 
+    # Valid JSON can still have the wrong root type for these input files.
     if not isinstance(loaded_file, list):
         raise ValueError("Loaded JSON data must be a list.")
 
@@ -75,6 +77,8 @@ def model_validation(path: str, model_class: type[TModel]) -> list[TModel]:
 
     valid_list: list[TModel] = []
     for list_element in json_file:
+
+        # Check before ** unpacking, which requires a mapping of field names.
         if not isinstance(list_element, dict):
             raise ValueError("Elements of JSON list must be dict.")
 
@@ -82,6 +86,7 @@ def model_validation(path: str, model_class: type[TModel]) -> list[TModel]:
         valid_data = model_class(**list_element)
         valid_list.append(valid_data)
 
+    # These whole-list checks apply to definitions, not to every model type.
     if model_class is data_models.FunctionDefinition:
         if not valid_list:
             raise ValueError("Function list cannot be empty.")
@@ -93,6 +98,7 @@ def model_validation(path: str, model_class: type[TModel]) -> list[TModel]:
                 if not function.name.strip():
                     raise ValueError("Function name cannot be empty.")
 
+                # Remember earlier names to reject ambiguous duplicate entries.
                 if function.name in function_names:
                     raise ValueError(
                         f"Duplicate function name: "
@@ -130,9 +136,11 @@ def write_results(
     model_to_dict_list: list[dict[str, object]] = []
 
     for model in results:
+        # model_dump() also converts nested Pydantic objects into plain data.
         result_dict = model.model_dump()
         model_to_dict_list.append(result_dict)
 
+    # Serialize first so invalid values cannot truncate an existing file.
     json_text = json.dumps(
         model_to_dict_list,
         ensure_ascii=False,
@@ -140,6 +148,7 @@ def write_results(
         indent=4,
     )
 
+    # Output directories may be absent after a fresh clone or make clean.
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w", encoding="utf-8") as file:

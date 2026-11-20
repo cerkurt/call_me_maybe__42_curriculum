@@ -30,7 +30,7 @@ class ParameterDefinition(BaseModel):
     an expected argument, not the value extracted from a user request.
     """
 
-    type: Literal["number", "string", "boolean"]
+    type: Literal["number", "integer", "string", "boolean"]
 
 
 class ReturnDefinition(BaseModel):
@@ -40,7 +40,7 @@ class ReturnDefinition(BaseModel):
     function calls rather than executing them or producing this return value.
     """
 
-    type: Literal["number", "string", "boolean"]
+    type: Literal["number", "integer", "string", "boolean"]
 
 
 class FunctionDefinition(BaseModel):
@@ -112,6 +112,7 @@ def parameter_type_checker(
     for parameter_name, parameter_value in parameter_dict.items():
         parameters_from_dict.append(parameter_name)
 
+    # Check both directions: required keys can be missing or extra keys added.
     for parameter in parameters_from_function:
         if parameter not in parameters_from_dict:
             raise ValueError(
@@ -128,7 +129,9 @@ def parameter_type_checker(
             )
 
     for parameter_name, parameter_type in function_object.parameters.items():
+        # Compare declared type metadata with the extracted Python value.
         parameter_value = parameter_dict[parameter_name]
+        # bool subclasses int, so number fields must reject it explicitly.
         if (
             parameter_type.type == "number"
             and not isinstance(parameter_value, (int, float))
@@ -145,6 +148,7 @@ def parameter_type_checker(
                 f"but must be part of 'int' or 'float' class."
             )
 
+        # NaN and infinities are floats, but not standard JSON numbers.
         elif parameter_type.type == "number" and (
             isinstance(parameter_value, float)
             and not math.isfinite(parameter_value)
@@ -176,4 +180,13 @@ def parameter_type_checker(
                 f"Current parameter value type is "
                 f"{C.YELLOW}{type(parameter_value).__name__}{C.RESET} "
                 f"but must be part of 'bool' class."
+            )
+
+        elif parameter_type.type == "integer" and (
+            not isinstance(parameter_value, int)
+            or isinstance(parameter_value, bool)
+        ):
+            raise ValueError(
+                f"Parameter {parameter_name!r} must be an integer, "
+                f"got {type(parameter_value).__name__}."
             )

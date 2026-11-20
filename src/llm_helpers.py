@@ -44,13 +44,16 @@ def find_allowed_next_token_ids(
     Neither the candidate mapping nor the generated prefix is modified.
     """
     allowed_id_list: set[int] = set()
-    for name, token_id in name_id_pair.items():
+    for token_id in name_id_pair.values():
+        # An empty generated prefix matches every candidate's empty slice.
+        # Later, only candidates beginning with all generated IDs can remain.
         if (token_id[: len(candidate_id_list)] == candidate_id_list) and len(
             token_id
         ) != len(candidate_id_list):
             # After N generated IDs, the following candidate index is N.
             allowed_id_list.add(token_id[len(candidate_id_list)])
 
+    # Shared prefixes can offer the same next ID; the set keeps it only once.
     return list(allowed_id_list)
 
 
@@ -84,6 +87,7 @@ def select_next_token_id(
     # Equal scores can belong to different IDs; enumerate tracks positions.
     for logit_index, logit in enumerate(logit_list):
         if logit_index not in list_to_set:
+            # Keep each ID's position; mask its score instead of removing it.
             logit_list[logit_index] = neg_infinite
 
     next_allowed_logit = max(logit_list)
@@ -123,8 +127,10 @@ def generate_name_from_candidates(
     histories. Candidate membership is enforced, not semantic correctness.
     """
     encode_result = model_object.encode(selection_prompt)
+    # encode() returns a batch: take its first row to get a flat ID list.
     all_token_ids = encode_result[0].tolist()
 
+    # Prefix checks use only the continuation, not the original prompt IDs.
     generated_token_ids: list[int] = []
 
     allowed_token_ids = find_allowed_next_token_ids(
@@ -132,6 +138,7 @@ def generate_name_from_candidates(
     )
 
     for _ in range(max_token_count):
+        # Return the original candidate text once its whole ID list matches.
         for function_name, function_id in function_id_match.items():
             if function_id == generated_token_ids:
                 return function_name
@@ -159,14 +166,14 @@ def generate_name_from_candidates(
 def score_function_candidate(
     model_object: Small_LLM_Model,
     selection_prompt: str,
-    function_name: str,
+    candidate_scoring_text: str,
 ) -> float:
     """Sum token log-probabilities for a complete candidate continuation.
 
     Args:
         model_object: Existing SDK model providing encoding and logits.
         selection_prompt: Context before the candidate continuation.
-        function_name: Candidate text to score; may also be Yes or No.
+        candidate_scoring_text: Candidate text to score; may also be Yes or No.
 
     Returns:
         The sum of the candidate tokens' conditional log-probabilities.
@@ -179,19 +186,25 @@ def score_function_candidate(
     fixed continuation rather than choosing new tokens or masking logits.
     """
     context_ids = model_object.encode(selection_prompt)[0].tolist()
-    candidate_ids = model_object.encode(function_name)[0].tolist()
+    candidate_ids = model_object.encode(candidate_scoring_text)[0].tolist()
 
     total_score = 0.0
 
     for token_id in candidate_ids:
         logits = model_object.get_logits_from_input_ids(context_ids)
 
+        # Subtract the maximum before exp() to avoid very large exponentials.
         max_logit = max(logits)
-        log_sum_exp = max_logit + math.log(
-            sum(math.exp(logit - max_logit) for logit in logits)
-        )
+        exp_sum = 0.0
 
+        for logit in logits:
+            exp_sum += math.exp(logit - max_logit)
+
+        log_sum_exp = max_logit + math.log(exp_sum)
+
+        # This is the current token's log-softmax score over the vocabulary.
         total_score += logits[token_id] - log_sum_exp
+        # Append the known candidate token so its next token has full context.
         context_ids.append(token_id)
 
     return total_score

@@ -196,26 +196,33 @@ The application validates output parameter names and declared types before writi
 Structural validation does not guarantee that the selected function and arguments are 
 semantically correct.
 
-### Code-quality checks
+### Makefile commands and code-quality checks
 
-The included Makefile provides the required targets:
+Run all Makefile commands from the repository root.
+
+#### Setup and execution
 
 | Command | Description |
 |---|---|
-| `make install` | Install and synchronize project dependencies. |
-| `make run` | Run the application and report execution time. |
+| `make install` | Install and synchronize project dependencies using `uv sync`. |
+| `make run` | Run the application with its default inputs and report execution time. |
 | `make debug` | Run the application with Python's `pdb` debugger. |
-| `make clean` | Remove Python bytecode and development cache directories. |
-| `make lint` | Run Flake8 and mypy with the mandatory project flags. |
-| `make lint-strict` | Run Flake8 and mypy with `--strict` (additional check). |
+| `make clean` | Remove Python bytecode, development caches, and generated files under `data/output/`. |
 
-Run the required code-quality checks:
+#### Code-quality checks
+
+| Command | Description |
+|---|---|
+| `make lint` | Run Flake8 and mypy with the configured project flags. |
+| `make lint-strict` | Run Flake8 and mypy with additional `--strict` type checking. |
+
+Run the standard checks:
 
 ```bash
 make lint
 ```
 
-The `lint` target runs Flake8 and mypy with all flags required by the project subject:
+The mypy command includes:
 
 - `--warn-return-any`
 - `--warn-unused-ignores`
@@ -229,8 +236,65 @@ For additional type checking:
 make lint-strict
 ```
 
-The supplied SDK and configured development/test directories are excluded from direct lint checks. 
-The application's production code remains subject to validation.
+Flake8 excludes `.venv/`, `venv/`, and `llm_sdk/`, as configured in
+`.flake8`. Mypy excludes `.venv/`, `llm_sdk/`, and `tests/` from recursive
+file discovery, as configured in `pyproject.toml`.
+
+#### CLI test suites
+
+| Command | Description |
+|---|---|
+| `make test-errors` | Run nine error scenarios independently, displaying each result and continuing after failed CLI runs. |
+| `make test-21` | Process the 21-prompt suite and write `data/output/results_21.json`. |
+| `make compare-21` | Compare the saved 21-prompt results against the expected calls. |
+| `make test-42` | Process the 42-prompt suite and write `data/output/results_42.json`. |
+| `make compare-42` | Compare the saved 42-prompt results against the expected calls. |
+
+Generate results before comparing them:
+
+```bash
+make test-21
+make compare-21
+
+make test-42
+make compare-42
+```
+
+Only run a comparison after generation completes successfully.
+The comparison commands read existing output files without loading the
+model. They report matching calls, mismatches, missing results, extra
+results, and exact-call accuracy.
+
+The error-case runner displays the application's behavior for manual
+inspection; it does not automatically assert that each error is correct.
+
+#### Moulinette evaluation
+
+These commands require the `moulinette/` directory in the repository root.
+
+| Command | Description |
+|---|---|
+| `make moulinette-prepare` | Synchronize moulinette dependencies and generate the private exercises. |
+| `make moulinette-run` | Run the application on those exercises and write `data/output/moulinette_results.json`. |
+| `make moulinette-grade` | Grade the existing result file using the private exercise set. |
+| `make test-moulinette` | Run preparation, answer generation, and grading sequentially. |
+
+Run the complete workflow:
+
+```bash
+make test-moulinette
+```
+
+To evaluate code changes using already prepared exercises, regenerate the
+answers and then grade them:
+
+```bash
+make moulinette-run
+make moulinette-grade
+```
+
+The complete workflow stops if a command returns a nonzero exit status.
+Grading results should also be inspected in the terminal.
 
 ## Input and output formats
 
@@ -330,8 +394,9 @@ declared as `"number"`.
 
 ## Project structure
 
-The application separates command-line execution, data validation, model inference, 
-and argument extraction into dedicated modules:
+The application separates command-line execution, data validation, model inference,
+and argument extraction into dedicated modules. Documentation assets and CLI test
+fixtures are stored separately:
 
 ```text
 .
@@ -341,59 +406,121 @@ and argument extraction into dedicated modules:
 │   ├── data_io.py               # JSON loading, validation, and writing
 │   ├── data_models.py           # Pydantic schemas and parameter type checks
 │   ├── generation_flow.py       # Main function-calling pipeline
-│   ├── function_selectors.py    # Function ranking and capability reranking
+│   ├── function_selectors.py    # Request support checks and hybrid selection
 │   ├── parameter_extractors.py  # Argument candidates and extraction prompts
 │   ├── llm_helpers.py           # Token scoring and constrained decoding
 │   └── regex_helpers.py         # Regex candidate selection and replacement
 ├── data/
-│   ├── input/                   # Default function definitions and prompts
+│   ├── input/
+│   │   ├── functions_definition.json
+│   │   └── function_calling_tests.json
 │   └── output/                  # Created at runtime; excluded from Git
-├── tests/                       # Additional tests and evaluation utilities
+├── docs/
+│   ├── section1.png             # Input validation and model initialization
+│   ├── section2.png             # Request support check
+│   ├── section3.png             # Hybrid function selection
+│   ├── section4.png             # Typed argument candidates
+│   ├── section5.png             # Constrained argument extraction
+│   ├── section6.png             # Regex handling and final validation
+│   ├── section7.png             # Result collection and JSON output
+│   ├── workflow.pdf             # Combined architecture diagram
+│   └── call_me_maybe_v1_5.pdf   # Project subject
+├── test_suite/
+│   ├── 01_errors/               # Invalid inputs and supporting fixtures
+│   ├── 02_prompts_21/
+│   │   ├── functions.json       # Available function definitions
+│   │   ├── prompts.json         # Requests to process
+│   │   └── expected.json        # Expected function calls and arguments
+│   ├── 03_prompts_42/
+│   │   ├── functions.json
+│   │   ├── prompts.json
+│   │   └── expected.json
+│   ├── run_error_cases.py       # Run error scenarios independently
+│   ├── compare_results.py       # Compare expected and actual results
+│   └── README.md                # Detailed test instructions
 ├── llm_sdk/                     # Supplied uv workspace package
 ├── pyproject.toml
 ├── uv.lock
 ├── Makefile
 ├── .flake8
 ├── .gitignore
-├── call_me_maybe_v1_5.pdf
 └── README.md
 ```
 
-The entry point, `src/__main__.py`, calls `generation_flow.progress_builder()`, which coordinates 
-function selection, parameter extraction, regex handling, and final result validation.
+The entry point, `src/__main__.py`, validates the input files, initializes the model,
+and calls `generation_flow.progress_builder()`. The pipeline coordinates request
+support checks, function selection, parameter extraction, regex handling, and final
+result validation. The CLI then writes the collected results through `data_io`.
 
-The output directory is generated automatically when results are written and is not i
-ncluded in the submitted repository.
+The `data/output/` directory is created automatically when results are written and
+is excluded from the submitted repository through `.gitignore`.
 
 ## Architecture diagram
 
-A detailed, interactive flowchart of the application is available on 
-[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?node-id=0-1&p=f&t=P96hPD09sWdrDlUF-0).
+Explore the complete application flow on
+[FigJam](https://www.figma.com/board/3LcRyYZk3coNHkmvc3bKv7/call_me_maybe_codam_cerkurt?node-id=0-1).
 
-The diagram illustrates the complete execution flow, including input validation, hybrid 
-function selection, parameter extraction, constrained decoding, regex handling, and result serialization.
+The screenshots below divide the diagram into seven consecutive sections.
+All seven sections are displayed below. Click an image to open it separately.
 
-A simplified Mermaid diagram is included in the following section to provide a 
-high-level overview of the algorithm.
+### 1. Input validation and model initialization
+
+Validate the input files before loading the model. Reuse one model instance
+across requests and pass the validated data to the generation pipeline.
+
+[![Input validation and model initialization](docs/section1.png)](docs/section1.png)
+
+### 2. Request support check
+
+Use the LLM to identify clearly unsupported requests before ranking function
+names. Passing this check allows processing to continue; it does not
+guarantee a correct function call.
+
+[![Request support check](docs/section2.png)](docs/section2.png)
+
+### 3. Hybrid function selection
+
+Score complete function names using token log-probabilities. When the two
+leading scores are close, compare their capabilities using separate
+Yes/No scores.
+
+[![Hybrid function selection](docs/section3.png)](docs/section3.png)
+
+### 4. Typed argument candidates
+
+Build candidate values according to each parameter's declared type:
+number, integer, string, or boolean. Defer the special regex parameter
+until its source text and replacement have been extracted.
+
+[![Typed argument candidate generation](docs/section4.png)](docs/section4.png)
+
+### 5. Constrained argument extraction
+
+Prepare the extraction prompt, serialize and encode the candidates,
+and mask disallowed next-token IDs during generation. Parse the selected
+JSON value and store it in the parameter dictionary.
+
+[![Token-level constrained argument extraction](docs/section5.png)](docs/section5.png)
+
+### 6. Regex handling and final validation
+
+After ordinary argument extraction, normalize supported replacement names
+and select a regex pattern when required. Validate the complete argument
+dictionary against the selected function definition.
+
+[![Regex handling and argument validation](docs/section6.png)](docs/section6.png)
+
+### 7. Result collection and JSON output
+
+Collect one structured result per successfully processed request.
+After all requests complete, serialize the results into the output JSON
+file. The application describes function calls without executing them.
+
+[![Result collection and JSON output](docs/section7.png)](docs/section7.png)
 
 ## Algorithm explanation
 
 ### End-to-end overview
-
-```mermaid
-flowchart TD
-  A[Load JSON inputs] --> B[Validate with Pydantic]
-  B --> C[Initialize one SDK model]
-  C --> D[For each user request]
-  D --> E[Hybrid function selection]
-  E --> F[Find selected FunctionDefinition]
-  F --> G[Extract parameters using constrained decoding]
-  G --> H[Optional regex post-processing]
-  H --> I[Validate parameters and create FunctionCallResult]
-  I --> J{More requests?}
-  J -->|Yes| D
-  J -->|No| K[Write one JSON array]
-```
 
 `progress_builder()` orchestrates the requests. It does not execute
 functions; it produces descriptions of calls. It reuses the same
@@ -462,17 +589,6 @@ The selector retains the best and second-best full scores and calculates:
 
 ```text
 margin = best_score - second_score
-```
-
-```mermaid
-flowchart TD
-    A[Score every complete available function name] --> B{Second candidate exists?}
-    B -->|No| C[Return the only scored candidate]
-    B -->|Yes| D{Score margin at least 2.0?}
-    D -->|Yes| E[Return the best full-score candidate]
-    D -->|No| F[Capability check for the top two candidates]
-    F --> G[Compare Yes score minus No score]
-    G --> H[Return the higher capability score]
 ```
 
 A gap of at least **2.0** returns the full-score leader directly. A smaller
@@ -895,6 +1011,20 @@ helped distinguish actual string contents from their serialized representations.
 The current string extractors handle the tested quoting cases, but escaped quote delimiters 
 and ambiguous natural-language quoting remain areas where broader coverage is needed.
 
+A recent regression exposed another edge case involving empty quoted strings. 
+For the request `Echo ''.`, the expected argument was an empty string (`""`), 
+but the extractor returned `"''"`, containing the two quote characters instead.
+
+Both values are valid strings, so Pydantic and the final type checker cannot 
+detect this semantic mismatch. The result suggests that quote delimiters may be 
+retained during candidate construction or that the model selects a candidate 
+containing the delimiters instead of the empty value. The exact cause has not 
+yet been confirmed.
+
+This remains an unresolved edge case. It demonstrates why quoted-value extraction 
+needs dedicated regression tests, particularly after changes to string candidate 
+construction and selection.
+
 ### Schema validity and the intended meaning need different checks
 
 A generated argument can have the correct JSON type while still representing 
@@ -1002,17 +1132,18 @@ selection.
 
 | Metric | 21-prompt suite | 42-prompt suite |
 |---|---:|---:|
-| Correct complete calls | 21/21 | 40/42 |
+| Correct complete calls | 21/21 | 39/42 |
 | Correct function names | 21/21 | 42/42 |
 | Missing results | 0 | 0 |
 | Extra results | 0 | 0 |
-| Exact-call accuracy | 100.0% | 95.2% |
+| Exact-call accuracy | 100.0% | 92.9% |
 
 ### Known failures and limitations
 
-Two cases in the 42-prompt suite did not match their expected outputs. Both are 
-retained as documented failures rather than removed or modified to improve the 
-reported accuracy.
+The following failures were observed during testing with the 42-prompt suite. 
+They are retained as documented limitations rather than removed or modified to 
+improve the reported accuracy. Since the implementation has changed between test 
+runs, these cases should be rechecked together before reporting the final failure count.
 
 **Case 30 — Empty-string extraction**
 
@@ -1034,12 +1165,44 @@ Actual parameter:
 {"s": "Reverse"}
 ```
 
-The correct function, `fn_reverse_string`, was selected, but the extracted 
-argument was incorrect. The implementation selected a word from the surrounding 
-instruction instead of the intended empty string.
+The correct function, `fn_reverse_string`, was selected, but the extractor 
+chose a word from the surrounding instruction instead of the intended empty string.
 
-This demonstrates that string candidate availability and constrained decoding 
-do not guarantee semantic correctness, particularly when the requested value is empty.
+This demonstrates that candidate availability and constrained decoding do not 
+guarantee semantic correctness, particularly when the requested value is empty.
+
+**Additional case — Empty quoted string interpreted as literal quotes**
+
+Request:
+
+```text
+Echo ''.
+```
+
+Expected parameter:
+
+```json
+{"text": ""}
+```
+
+Actual parameter:
+
+```json
+{"text": "''"}
+```
+
+The correct function, `echo_text`, was selected, but the extracted value contained 
+two literal quote characters instead of an empty string.
+
+Unlike Case 30, where the model selected an unrelated word, this failure preserved 
+the quote delimiters as part of the argument.
+
+Both outputs are valid strings, so the final type checker cannot detect the 
+mismatch. The issue appeared after recent changes to string extraction, but the 
+exact cause has not yet been isolated. It remains unclear whether the empty-string 
+candidate was unavailable or the decoder selected a different valid candidate.
+
+These two cases illustrate distinct failure modes when processing empty quoted arguments.
 
 **Case 41 — Incorrect literal regex selection**
 
@@ -1070,8 +1233,7 @@ Actual parameters:
 ```
 
 The function name, source string, and replacement were correct. However, the 
-regex selector chose a general letter-sequence pattern rather than the requested 
-literal `cat`.
+regex selector chose a general letter-sequence pattern instead of the requested literal `cat`.
 
 Both patterns are syntactically valid, but their substitution behavior differs 
 significantly. The expected pattern matches occurrences of `cat`, while `[a-zA-Z]+` 
@@ -1083,20 +1245,26 @@ A related mandatory request was handled correctly:
 Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'
 ```
 
-The mandatory and extended requests differ in wording and punctuation. In particular, 
-the mandatory request explicitly identifies `cat` as *the word* to replace.
+The mandatory request explicitly identifies `cat` as *the word* to replace, 
+suggesting possible sensitivity to natural-language phrasing. However, the available 
+results do not establish the exact cause.
 
-This suggests a potential sensitivity to natural-language phrasing. However, the 
-available results do not establish whether the difference was caused by wording, 
-inference behavior, or another execution condition.
+The extended suite also contains more function definitions than the mandatory set. 
+Since each request is processed independently, a larger input file does not automatically 
+increase the context length of later requests.
 
-The 42-prompt set also contains more function definitions than the mandatory set. 
-Since the implementation processes each request independently rather than appending 
-previous requests to a conversation history, a larger input file does not automatically 
-imply a longer LLM context for later requests.
+These observations are documented as limitations of the current approach, not as 
+proof of a particular underlying cause.
 
-These observations are documented as limitations of the current implementation, 
-not as proof of a particular underlying cause.
+**Overall observation**
+
+All three observed failures involve semantically incorrect argument values rather 
+than invalid JSON or incorrect parameter types.
+
+They highlight a central limitation of the implementation: constrained decoding 
+restricts the model to predefined candidates, and schema validation enforces 
+structural correctness, but neither guarantees that the selected candidate matches 
+the user's intended meaning.
 
 ### Testing boundaries
 
@@ -1137,7 +1305,7 @@ parameter extraction, result serialization, and test-runner overhead.
 | Mandatory — 11 prompts | 48.07 | 12.24 | 11.13 |
 | Error cases — 9 scenarios | 29.61 | 21.43 | 12.89 |
 | Extended — 21 prompts | 107.91 | 20.09 | 12.92 |
-| Extended — 42 prompts | 202.10 | 33.32 | 12.31 |
+| Extended — 42 prompts | 207.86 | 32.54 | 8.07 |
 
 The mandatory run completed all 11 requests successfully in 48.07 seconds. 
 The 21-prompt suite completed in 107.91 seconds, while the 42-prompt suite 
@@ -1233,7 +1401,7 @@ would be required for a controlled performance comparison.
 
 ### References
 
-- [Project subject v1.5](call_me_maybe_v1_5.pdf): mandatory behavior, output
+- [Project subject v1.5](docs/call_me_maybe_v1_5.pdf): mandatory behavior, output
   format, evaluation targets, and README requirements.
 - [Supplied SDK source](llm_sdk/llm_sdk/__init__.py): public methods and model
   initialization.
@@ -1270,6 +1438,7 @@ in these areas:
 - **Tests and debugging:** Designing normal and edge-case prompts,
   generating independent expected results, analyzing wrong function
   choices and argument values.
+- uv.lock and Makefile setup.
 - **Documentation:** Reviewing README completeness against the project
   subject, preparing evaluation-friendly descriptions of trade-offs and
   known limitations.
