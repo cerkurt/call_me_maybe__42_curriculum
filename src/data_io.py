@@ -9,23 +9,12 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from . import data_models
+from . import colors as C
 
 import json
 
 # Keep the returned list's model type tied to the class supplied by the caller.
 TModel = TypeVar("TModel", bound=BaseModel)
-
-
-class C:
-    """ANSI color codes used to make terminal output easier to read."""
-
-    RESET = "\033[0m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    RED = "\033[31m"
-    PURPLE = "\033[35m"
-    BG_RED = "\033[41m"
 
 
 def load_json_file(path: str) -> list[object]:

@@ -4,16 +4,7 @@ import argparse
 import json
 
 
-class C:
-    """ANSI color codes used to make terminal output easier to read."""
-
-    RESET = "\033[0m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    RED = "\033[31m"
-    PURPLE = "\033[35m"
-    BG_RED = "\033[41m"
+from src import colors as C
 
 
 def compare_results() -> None:

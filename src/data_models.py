@@ -8,19 +8,9 @@ with the selected function's declarations.
 from pydantic import BaseModel
 from typing import Literal
 
+from . import colors as C
+
 import math
-
-
-class C:
-    """ANSI color codes used to make terminal output easier to read."""
-
-    RESET = "\033[0m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    RED = "\033[31m"
-    PURPLE = "\033[35m"
-    BG_RED = "\033[41m"
 
 
 class ParameterDefinition(BaseModel):
