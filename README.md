@@ -419,10 +419,10 @@ directories without expanding individual PNG images:
 │   └── output/                  # Created at runtime; excluded from Git
 ├── docs/
 │   ├── concept/
-│   │   ├── png/                # Concept presentation images
-│   │   └── index.html          # Concept presentation viewer
+│   │   ├── png/                 # Concept presentation images
+│   │   └── index.html           # Concept presentation viewer
 │   ├── workflow.pdf             # Combined architecture diagram
-│   └── call_me_maybe_v1_5.pdf    # Project subject
+│   └── call_me_maybe_v1_5.pdf   # Project subject
 ├── test_suite/
 │   ├── 01_errors/               # Invalid inputs and supporting fixtures
 │   ├── 02_prompts_21/
