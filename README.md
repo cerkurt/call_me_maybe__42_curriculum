@@ -396,13 +396,15 @@ declared as `"number"`.
 
 The application separates command-line execution, data validation, model inference,
 and argument extraction into dedicated modules. Documentation assets and CLI test
-fixtures are stored separately:
+fixtures are stored separately. The overview below lists the main files and
+directories without expanding individual PNG images:
 
 ```text
 .
 ├── src/
 │   ├── __init__.py              # Package initialization
 │   ├── __main__.py              # CLI, model initialization, error handling
+│   ├── colors.py                # Shared ANSI color constants
 │   ├── data_io.py               # JSON loading, validation, and writing
 │   ├── data_models.py           # Pydantic schemas and parameter type checks
 │   ├── generation_flow.py       # Main function-calling pipeline
@@ -416,15 +418,11 @@ fixtures are stored separately:
 │   │   └── function_calling_tests.json
 │   └── output/                  # Created at runtime; excluded from Git
 ├── docs/
-│   ├── section1.png             # Input validation and model initialization
-│   ├── section2.png             # Request support check
-│   ├── section3.png             # Hybrid function selection
-│   ├── section4.png             # Typed argument candidates
-│   ├── section5.png             # Constrained argument extraction
-│   ├── section6.png             # Regex handling and final validation
-│   ├── section7.png             # Result collection and JSON output
+│   ├── concept/
+│   │   ├── png/                # Concept presentation images
+│   │   └── index.html          # Concept presentation viewer
 │   ├── workflow.pdf             # Combined architecture diagram
-│   └── call_me_maybe_v1_5.pdf   # Project subject
+│   └── call_me_maybe_v1_5.pdf    # Project subject
 ├── test_suite/
 │   ├── 01_errors/               # Invalid inputs and supporting fixtures
 │   ├── 02_prompts_21/
@@ -446,6 +444,9 @@ fixtures are stored separately:
 ├── .gitignore
 └── README.md
 ```
+
+The architecture screenshots are stored directly in `docs/`. The concept
+presentation uses `docs/concept/index.html` and its images in `docs/concept/png/`.
 
 The entry point, `src/__main__.py`, validates the input files, initializes the model,
 and calls `generation_flow.progress_builder()`. The pipeline coordinates request

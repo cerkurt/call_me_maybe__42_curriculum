@@ -84,6 +84,7 @@ def select_next_token_id(
         raise ValueError("There are no allowed token ids in the given list.")
 
     list_to_set = set(allowed_token_ids)
+
     # Equal scores can belong to different IDs; enumerate tracks positions.
     for logit_index, logit in enumerate(logit_list):
         if logit_index not in list_to_set:
