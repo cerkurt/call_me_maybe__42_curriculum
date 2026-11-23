@@ -1,13 +1,53 @@
-"""Share chat formatting, token constraints, and candidate scoring helpers.
+"""Share chat formatting, cached logits, token constraints, and scoring.
 
 Use the SDK's public encoding and logit methods with a model supplied by
 the caller. Keep token-ID positions intact when masking logits, and keep
 generated candidate prefixes separate from their full model context.
+
+Reuse raw logits when the same unchanged model receives identical input
+IDs. During constrained generation, skip inference for a forced next token.
+Full candidate scoring still sums conditional log-probabilities over the
+complete vocabulary; it does not mask logits or execute functions.
 """
 
 from llm_sdk import Small_LLM_Model
 
+from functools import lru_cache
+
 import math
+
+
+# Keep at most eight model/input combinations. When full, evict the entry
+# that was least recently used. This cache exists only in runtime memory.
+@lru_cache(maxsize=8)
+def get_cached_logits(
+    model_object: Small_LLM_Model,
+    input_ids: tuple[int, ...],
+) -> tuple[float, ...]:
+    """Return next-token logits, reusing results for identical inputs.
+
+    Args:
+        model_object: Existing SDK model whose weights and settings remain
+            unchanged while its cached results are used.
+        input_ids: Complete context as a tuple of token IDs. Tuples can be
+            cache keys; mutable lists cannot.
+
+    Returns:
+        An immutable tuple of raw logits, indexed by vocabulary token ID.
+        These are not probabilities or already masked scores.
+
+    The cache key includes both the model object and the complete input-ID
+    tuple. The decorator reuses a stored result without entering this body
+    when both arguments match. A changed context requires a new inference
+    unless that exact model/context combination is still cached.
+
+    Callers that mask logits must first copy the tuple into a list. If the
+    model's weights or inference settings change, clear the cache before
+    reusing this helper. The cache does not persist between program runs.
+    """
+    # The SDK expects a list. Freeze its output so masking cannot modify the
+    # shared cached result through one of the callers.
+    return tuple(model_object.get_logits_from_input_ids(list(input_ids)))
 
 
 def format_request_message(identity: str, content: str) -> str:
@@ -41,7 +81,10 @@ def find_allowed_next_token_ids(
         matches the generated prefix. Return an empty list if none can
         continue. Deduplication uses a set, so output order is not guaranteed.
 
-    Neither the candidate mapping nor the generated prefix is modified.
+    This helper only checks prefix compatibility. It does not call the
+    model, compare scores, choose a winner, or delete candidates. Neither
+    the candidate mapping nor the generated prefix is modified. Completed
+    candidates have no next ID; the caller checks complete matches.
     """
     allowed_id_list: set[int] = set()
     for token_id in name_id_pair.values():
@@ -89,8 +132,10 @@ def select_next_token_id(
     for logit_index, logit in enumerate(logit_list):
         if logit_index not in list_to_set:
             # Keep each ID's position; mask its score instead of removing it.
+            # Permission determines masking, even for a high-scoring token.
             logit_list[logit_index] = neg_infinite
 
+    # Multiple IDs can remain allowed; choose just one for this step.
     next_allowed_logit = max(logit_list)
     allowed_token_index = logit_list.index(next_allowed_logit)
 
@@ -111,7 +156,8 @@ def generate_name_from_candidates(
         function_id_match: Candidate strings mapped to their encoded ID lists.
             Despite the name, candidates may be argument values or option
             codes as well as function names.
-        max_token_count: Maximum number of new candidate tokens to select.
+        max_token_count: Maximum number of new candidate tokens to select,
+            including forced tokens. This is not a model-call limit.
 
     Returns:
         The original mapping key whose entire token sequence matches the
@@ -123,9 +169,14 @@ def generate_name_from_candidates(
             without a complete match.
 
     Keep prompt-plus-continuation IDs for model context and continuation-only
-    IDs for prefix checks. At each step, mask forbidden scores, greedily
-    select the largest allowed score, and append the selected ID to both
-    histories. Candidate membership is enforced, not semantic correctness.
+    IDs for prefix checks. If exactly one next ID is allowed, take it without
+    model inference. Otherwise copy cached raw logits, mask forbidden IDs,
+    and greedily select the largest allowed score. Append either kind of
+    selected ID to both histories.
+
+    Stop on a complete token-sequence match, not merely when one candidate
+    remains. Return its original mapping key, so SDK decoding is unnecessary.
+    Candidate membership is enforced, not semantic correctness.
     """
     encode_result = model_object.encode(selection_prompt)
     # encode() returns a batch: take its first row to get a flat ID list.
@@ -140,6 +191,7 @@ def generate_name_from_candidates(
 
     for _ in range(max_token_count):
         # Return the original candidate text once its whole ID list matches.
+        # A single remaining candidate may still need several more tokens.
         for function_name, function_id in function_id_match.items():
             if function_id == generated_token_ids:
                 return function_name
@@ -148,9 +200,24 @@ def generate_name_from_candidates(
         allowed_token_ids = find_allowed_next_token_ids(
             function_id_match, generated_token_ids
         )
-        logit_scores = model_object.get_logits_from_input_ids(all_token_ids)
-        next_token_id = select_next_token_id(logit_scores, allowed_token_ids)
-        # Both candidate matching and the model must see the selected ID.
+
+        if len(allowed_token_ids) == 1:
+            # Several candidates can share this one forced next ID. There
+            # is no score comparison to make, so skip the model call.
+            next_token_id = allowed_token_ids[0]
+
+        else:
+            # Masking changes a list in place. Copy the immutable cached
+            # tuple so future callers can reuse the original raw logits.
+            logit_scores = list(
+                get_cached_logits(model_object, tuple(all_token_ids))
+            )
+            next_token_id = select_next_token_id(
+                logit_scores, allowed_token_ids
+            )
+
+        # Record forced tokens too: later model calls receive the complete
+        # context, while prefix checks see only the generated continuation.
         generated_token_ids.append(next_token_id)
         all_token_ids.append(next_token_id)
 
@@ -182,9 +249,18 @@ def score_function_candidate(
         candidate has a total score of 0.0.
 
     Encode the prompt and candidate separately. For each candidate token,
-    compute a stable log-sum-exp over the logits, add that token's log score,
-    and append its known ID to the context for the next step. This scores a
-    fixed continuation rather than choosing new tokens or masking logits.
+    get cached or freshly computed raw logits, normalize over the entire
+    vocabulary using log-sum-exp, and add that token's log-probability.
+    Append the known candidate ID so the next score includes earlier tokens.
+
+    Each call starts with the supplied prompt context. Identical contexts
+    can reuse logits across candidates, including their shared prefixes or
+    the Yes/No answers under the same question. The formula is unchanged.
+
+    Only the supplied candidate tokens are scored. Their summed log-score
+    corresponds to multiplying their conditional probabilities; it is not
+    a correctness percentage. This helper scores a fixed continuation and
+    does not choose tokens, mask logits, or execute the described function.
     """
     context_ids = model_object.encode(selection_prompt)[0].tolist()
     candidate_ids = model_object.encode(candidate_scoring_text)[0].tolist()
@@ -192,12 +268,15 @@ def score_function_candidate(
     total_score = 0.0
 
     for token_id in candidate_ids:
-        logits = model_object.get_logits_from_input_ids(context_ids)
+        # Matching requires the full context, not just the candidate name.
+        # The cached tuple is safe here because scoring only reads logits.
+        logits = get_cached_logits(model_object, tuple(context_ids))
 
         # Subtract the maximum before exp() to avoid very large exponentials.
         max_logit = max(logits)
         exp_sum = 0.0
 
+        # Include every vocabulary logit, not only the current candidates.
         for logit in logits:
             exp_sum += math.exp(logit - max_logit)
 

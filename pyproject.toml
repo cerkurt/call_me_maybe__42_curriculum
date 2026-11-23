@@ -26,7 +26,7 @@ llm-sdk = { workspace = true }
 
 
 [tool.mypy]
-exclude = ['(^|/)([.]venv|llm_sdk|tests)/']
+exclude = ['(^|/)([.]venv|llm_sdk|moulinette)/']
 mypy_path = ["llm_sdk"]
 
 [[tool.mypy.overrides]]

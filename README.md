@@ -236,9 +236,11 @@ For additional type checking:
 make lint-strict
 ```
 
-Flake8 excludes `.venv/`, `venv/`, and `llm_sdk/`, as configured in
-`.flake8`. Mypy excludes `.venv/`, `llm_sdk/`, and `tests/` from recursive
-file discovery, as configured in `pyproject.toml`.
+Flake8 excludes `.venv/`, `venv/`, `llm_sdk/`, and `moulinette/`, as
+configured in `.flake8`. Mypy excludes `.venv/`, `llm_sdk/`, `tests/`, and
+`moulinette/` from recursive file discovery, as configured in `pyproject.toml`.
+These exclusions apply to both `make lint` and `make lint-strict`, including
+when the moulinette directory is added later for evaluation.
 
 #### CLI test suites
 
