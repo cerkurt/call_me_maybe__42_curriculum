@@ -1,6 +1,6 @@
 
 # Required targets from call_me_maybe v1.5
-.PHONY: install run debug clean lint lint-strict test test-helpers test-io test-model test-model-smoke
+.PHONY: install run debug clean lint lint-strict
 
 install:
 	uv sync
